@@ -1,18 +1,18 @@
 import { initializeApp } from "firebase/app";
-import { 
-  getFirestore, 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  addDoc, 
-  updateDoc, 
+import {
+  getFirestore,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  addDoc,
+  updateDoc,
   deleteDoc,
   onSnapshot,
-  query, 
-  where, 
-  orderBy, 
+  query,
+  where,
+  orderBy,
   serverTimestamp,
   type DocumentData
 } from "firebase/firestore";
@@ -184,14 +184,14 @@ export async function loginWithEmailAndPassword(email: string, password: string)
       const cached = getLocalUsersCache().find(u => u.email === cleanEmail && u.password === password);
       return cached ? cached.profile : null;
     }
-    
+
     const credData = credSnap.data();
     if (credData.password !== password) return null;
-    
+
     const userRef = doc(db, "users", credData.employeeId);
     const userSnap = await getDoc(userRef);
     if (!userSnap.exists()) return null;
-    
+
     const profile = userSnap.data() as EmployeeProfile;
     cacheUserLocally(cleanEmail, password, profile);
     return profile;
@@ -207,8 +207,8 @@ export async function loginWithEmailAndPassword(email: string, password: string)
 }
 
 export async function registerUser(
-  profile: Omit<EmployeeProfile, "role">, 
-  password: string, 
+  profile: Omit<EmployeeProfile, "role">,
+  password: string,
   role: "employee" | "admin" = "employee"
 ): Promise<EmployeeProfile | null> {
   const cleanEmail = profile.email.toLowerCase().trim();
@@ -294,8 +294,8 @@ export async function logActivity(userId: string, userName: string, action: stri
 
 // Notification Helper
 export async function createNotification(
-  userId: string, 
-  title: string, 
+  userId: string,
+  title: string,
   message: string,
   expenseId?: string,
   voucherNumber?: string
@@ -461,7 +461,7 @@ export async function clearVoucherCommentsForMonth(
 export async function getUserNotifications(userId: string): Promise<AppNotification[]> {
   try {
     const q = query(
-      collection(db, "notifications"), 
+      collection(db, "notifications"),
       where("userId", "==", userId)
     );
     const snap = await getDocs(q);
@@ -509,9 +509,9 @@ export async function markExpenseNotificationsAsRead(userId: string, expenseId?:
 
 // Duplicate bill detection helper
 export async function checkForDuplicateBill(
-  amount: number, 
-  date: string, 
-  category: string, 
+  amount: number,
+  date: string,
+  category: string,
   ignoredExpenseId?: string
 ): Promise<Expense | null> {
   try {
@@ -569,7 +569,7 @@ export async function getBillData(expenseId: string, billId: string): Promise<st
       chunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
       return chunks.map(c => c.chunkData).join("");
     }
-    
+
     // Fallback: check if the expense document itself has it (legacy offline/inline receipts)
     const expDoc = await getDoc(doc(db, "expenses", expenseId));
     if (expDoc.exists()) {
@@ -624,7 +624,7 @@ export async function resequenceVouchersForMonth(yearMonth: string): Promise<voi
       });
 
       if (exp.voucherNumber !== newVoucherNumber) {
-        await updateDoc(doc(db, "expenses", exp.id), { 
+        await updateDoc(doc(db, "expenses", exp.id), {
           voucherNumber: newVoucherNumber,
           bills: updatedBills
         });
@@ -705,9 +705,9 @@ export async function submitExpense(expenseData: Omit<Expense, "id" | "status" |
     }
 
     await logActivity(
-      expenseData.employeeId, 
-      expenseData.employeeName, 
-      "Submit Expense", 
+      expenseData.employeeId,
+      expenseData.employeeName,
+      "Submit Expense",
       `Submitted expense: ${expenseData.title} for $${expenseData.totalAmount}`
     );
 
@@ -716,8 +716,8 @@ export async function submitExpense(expenseData: Omit<Expense, "id" | "status" |
     const adminsSnap = await getDocs(adminsQuery);
     for (const adminDoc of adminsSnap.docs) {
       await createNotification(
-        adminDoc.id, 
-        "New Expense Submitted", 
+        adminDoc.id,
+        "New Expense Submitted",
         `${expenseData.employeeName} submitted an expense of ₹${expenseData.totalAmount} for ${expenseData.category}`,
         result.id,
         result.voucherNumber
@@ -732,14 +732,14 @@ export async function submitExpense(expenseData: Omit<Expense, "id" | "status" |
 }
 
 export async function updateExpense(
-  id: string, 
-  expenseData: Partial<Expense>, 
-  updaterUserId: string, 
+  id: string,
+  expenseData: Partial<Expense>,
+  updaterUserId: string,
   updaterName: string
 ): Promise<void> {
   try {
     const ref = doc(db, "expenses", id);
-    
+
     // Clean undefined fields to prevent Firestore updateDoc error with undefined values
     const cleanData: Record<string, any> = {};
     Object.entries(expenseData).forEach(([key, val]) => {
@@ -749,11 +749,11 @@ export async function updateExpense(
     });
 
     await updateDoc(ref, cleanData);
-    
+
     await logActivity(
-      updaterUserId, 
-      updaterName, 
-      "Update Expense", 
+      updaterUserId,
+      updaterName,
+      "Update Expense",
       `Updated expense ID: ${id}. Status changed to: ${expenseData.status || 'no change'}`
     );
   } catch (error) {
@@ -788,9 +788,9 @@ export async function deleteExpense(id: string, employeeId: string, employeeName
     }
 
     await logActivity(
-      employeeId, 
-      employeeName, 
-      "Delete Expense", 
+      employeeId,
+      employeeName,
+      "Delete Expense",
       `Deleted pending expense ID: ${id}`
     );
   } catch (error) {
@@ -812,7 +812,7 @@ export async function deleteBillAttachmentFromExpense(expenseId: string, billId:
 
     // Delete chunks for this specific bill
     const q = query(
-      collection(db, "bill_chunks"), 
+      collection(db, "bill_chunks"),
       where("expenseId", "==", expenseId),
       where("billId", "==", billId)
     );
@@ -838,7 +838,7 @@ export async function getExpenses(): Promise<Expense[]> {
   try {
     const snap = await getDocs(collection(db, "expenses"));
     const expenses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
-    
+
     // Group and check for out-of-order voucher numbers to trigger self-healing resequencing
     const groups: { [key: string]: Expense[] } = {};
     expenses.forEach(e => {
@@ -910,7 +910,7 @@ export async function getExpensesByEmployee(employeeId: string): Promise<Expense
     const q = query(collection(db, "expenses"), where("employeeId", "==", employeeId));
     const snap = await getDocs(q);
     const expenses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
-    
+
     // Sort ascending by YearMonth, then ascending by voucher sequence suffix
     expenses.sort((a, b) => {
       const ymA = (a.date || "").substring(0, 7);
@@ -942,7 +942,7 @@ export function subscribeToExpenses(callback: (expenses: Expense[]) => void): ()
   const colRef = collection(db, "expenses");
   return onSnapshot(colRef, (snap) => {
     const expenses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
-    
+
     // Sort ascending by YearMonth, then ascending by voucher sequence suffix
     expenses.sort((a, b) => {
       const ymA = (a.date || "").substring(0, 7);
@@ -973,7 +973,7 @@ export function subscribeToExpensesByEmployee(employeeId: string, callback: (exp
   const q = query(collection(db, "expenses"), where("employeeId", "==", employeeId));
   return onSnapshot(q, (snap) => {
     const expenses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
-    
+
     expenses.sort((a, b) => {
       const ymA = (a.date || "").substring(0, 7);
       const ymB = (b.date || "").substring(0, 7);
@@ -1001,7 +1001,7 @@ export async function getEmployees(): Promise<EmployeeProfile[]> {
   try {
     const snap = await getDocs(collection(db, "users"));
     const list = snap.docs.map(d => d.data() as EmployeeProfile);
-    
+
     const seen = new Set<string>();
     const uniqueList: EmployeeProfile[] = [];
     for (const emp of list) {
@@ -1046,10 +1046,10 @@ export async function toggleEmployeeAdminRole(targetEmployeeId: string, currentA
     const userRef = doc(db, "users", targetEmployeeId);
     const userSnap = await getDoc(userRef);
     if (!userSnap.exists()) return false;
-    
+
     const userData = userSnap.data() as EmployeeProfile;
     const newRole = userData.role === "admin" ? "employee" : "admin";
-    
+
     await updateDoc(userRef, { role: newRole });
     await logActivity(
       targetEmployeeId,
@@ -1065,8 +1065,8 @@ export async function toggleEmployeeAdminRole(targetEmployeeId: string, currentA
 }
 
 export async function deleteEmployeeProfile(
-  targetEmployeeId: string, 
-  adminUserId: string, 
+  targetEmployeeId: string,
+  adminUserId: string,
   adminName: string,
   deleteExpenses: boolean = false
 ): Promise<boolean> {
@@ -1078,12 +1078,12 @@ export async function deleteEmployeeProfile(
     const userRef = doc(db, "users", targetEmployeeId);
     const userSnap = await getDoc(userRef);
     if (!userSnap.exists()) return false;
-    
+
     const userData = userSnap.data() as EmployeeProfile;
 
-    
+
     await deleteDoc(userRef);
-    
+
     let expensesDeletedCount = 0;
     if (deleteExpenses) {
       const q = query(collection(db, "expenses"), where("employeeId", "==", targetEmployeeId));
@@ -1092,7 +1092,7 @@ export async function deleteEmployeeProfile(
       await Promise.all(batchPromises);
       expensesDeletedCount = snap.docs.length;
     }
-    
+
     await logActivity(
       adminUserId,
       adminName,
