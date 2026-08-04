@@ -73,6 +73,12 @@ export default function Login({ onLoginSuccess }: LoginProps) {
           setLoading(false);
           return;
         }
+        if (!isAdminPath && user.role === "admin") {
+          // If admin logs in on employee route, switch URL to /admin automatically
+          if (typeof window !== "undefined") {
+            window.history.pushState({}, "", "/admin");
+          }
+        }
         onLoginSuccess(user);
       } else {
         setError("Invalid email or password. Please check your credentials.");
@@ -159,12 +165,34 @@ export default function Login({ onLoginSuccess }: LoginProps) {
             ExpenseFlow
           </h2>
 
-          <div className="mt-2 flex justify-center">
-            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${isAdminPath ? "bg-purple-50 text-purple-700 border border-purple-200" : "bg-indigo-50 text-indigo-700 border border-indigo-200"
-              }`}>
-              {isAdminPath ? <Shield className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
-              {isAdminPath ? "Admin Portal" : "Employee Portal"}
-            </span>
+          {/* Interactive Portal Switcher Tabs */}
+          <div className="mt-4 flex rounded-xl bg-slate-100 p-1 border border-slate-200">
+            <button
+              id="switch-to-employee-portal-btn"
+              type="button"
+              onClick={() => navigateToPath(false)}
+              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                !isAdminPath
+                  ? "bg-white text-indigo-700 shadow-xs border border-slate-200/60"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <User className="h-3.5 w-3.5" />
+              Employee Portal (/)
+            </button>
+            <button
+              id="switch-to-admin-portal-btn"
+              type="button"
+              onClick={() => navigateToPath(true)}
+              className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                isAdminPath
+                  ? "bg-white text-purple-700 shadow-xs border border-slate-200/60"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <Shield className="h-3.5 w-3.5" />
+              Admin Portal (/admin)
+            </button>
           </div>
 
           <p className="mt-2 text-center text-sm text-slate-500 font-medium">
