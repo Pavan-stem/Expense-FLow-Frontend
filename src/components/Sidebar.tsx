@@ -104,24 +104,6 @@ export default function Sidebar({ activeTab, onTabChange, user, isMobileOpen, on
 
         {/* Sidebar Footer Info */}
         <div className="p-4 border-t border-slate-800 text-xs text-slate-500 space-y-2.5">
-          <button
-            id="sidebar-switch-portal-btn"
-            onClick={() => {
-              if (onClose) onClose();
-              const targetUrl = user.role === "admin" ? "/" : "/admin";
-              window.history.pushState({}, "", targetUrl);
-            }}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800/70 hover:bg-slate-800 transition cursor-pointer border border-slate-700/60"
-          >
-            <div className="flex items-center gap-2">
-              <Shield className="h-4 w-4 text-indigo-400" />
-              <span>{user.role === "admin" ? "Employee Portal" : "Admin Portal"}</span>
-            </div>
-            <span className="text-[10px] font-mono text-slate-400 font-bold bg-slate-900 px-1.5 py-0.5 rounded">
-              {user.role === "admin" ? "/" : "/admin"}
-            </span>
-          </button>
-
           {onLogout && (
             <button
               id="sidebar-logout-btn"

@@ -106,17 +106,10 @@ export default function Navbar({
         <h1 className="text-sm sm:text-lg md:text-xl font-bold text-slate-800 tracking-tight font-sans truncate">
           ExpenseFlow
         </h1>
-        <button
-          id="nav-switch-portal-badge"
-          onClick={() => {
-            const targetUrl = user.role === "admin" ? "/" : "/admin";
-            window.history.pushState({}, "", targetUrl);
-          }}
-          className="hidden xs:inline-flex items-center gap-1 text-[9px] sm:text-xs font-semibold px-2 sm:px-2.5 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-full font-mono uppercase tracking-wider flex-shrink-0 transition cursor-pointer border border-indigo-200/60"
-          title={`Click to switch link to ${user.role === "admin" ? "Employee Portal (/)" : "Admin Portal (/admin)"}`}
-        >
-          <span>{user.role}</span>
-        </button>
+        <div className="hidden xs:block h-3.5 w-[1px] bg-slate-200" />
+        <span className="hidden xs:inline-block text-[9px] sm:text-xs font-semibold px-1.5 sm:px-2.5 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-mono uppercase tracking-wider flex-shrink-0">
+          {user.role}
+        </span>
       </div>
 
       {/* Utilities */}

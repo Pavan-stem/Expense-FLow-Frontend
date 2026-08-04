@@ -20,88 +20,25 @@ export default function App() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [targetExpenseId, setTargetExpenseId] = useState<string | null>(null);
 
-  // Helper to check if user role matches the current URL path
-  const validateUserForCurrentPath = (user: EmployeeProfile | null): EmployeeProfile | null => {
-    if (!user) return null;
-    const isAdminPath = typeof window !== "undefined" && window.location.pathname.startsWith("/admin");
-    if (isAdminPath && user.role !== "admin") {
-      // Employee account on /admin path -> do not show employee account on /admin
-      return null;
-    }
-    if (!isAdminPath && user.role === "admin") {
-      // Admin account on employee path (/) -> do not show admin account on employee path
-      return null;
-    }
-    return user;
-  };
-
-  // Monkey patch pushState & replaceState so history navigation triggers popstate event
-  useEffect(() => {
-    const originalPushState = history.pushState;
-    const originalReplaceState = history.replaceState;
-
-    history.pushState = function (...args) {
-      originalPushState.apply(this, args);
-      window.dispatchEvent(new Event("popstate"));
-    };
-
-    history.replaceState = function (...args) {
-      originalReplaceState.apply(this, args);
-      window.dispatchEvent(new Event("popstate"));
-    };
-
-    return () => {
-      history.pushState = originalPushState;
-      history.replaceState = originalReplaceState;
-    };
-  }, []);
-
-  // Database auto-seeding on mount & route change listener
+  // Database auto-seeding on mount
   useEffect(() => {
     const initDb = async () => {
       await seedDatabaseIfNeeded();
     };
     initDb();
 
-    const checkSessionAndPath = () => {
-      const savedUserStr = localStorage.getItem("expense_flow_user");
-      if (savedUserStr) {
-        try {
-          const savedUser: EmployeeProfile = JSON.parse(savedUserStr);
-          const validUser = validateUserForCurrentPath(savedUser);
-          if (validUser) {
-            setCurrentUser(validUser);
-          } else {
-            // Role does not match current URL link -> do not show logged-in account
-            setCurrentUser(null);
-            localStorage.removeItem("expense_flow_user");
-          }
-        } catch (e) {
-          console.error("Failed to recover login session:", e);
-          setCurrentUser(null);
-          localStorage.removeItem("expense_flow_user");
-        }
-      } else {
-        setCurrentUser(null);
+    // Recover login session from localStorage
+    const savedUser = localStorage.getItem("expense_flow_user");
+    if (savedUser) {
+      try {
+        setCurrentUser(JSON.parse(savedUser));
+      } catch (e) {
+        console.error("Failed to recover login session:", e);
       }
-    };
-
-    checkSessionAndPath();
-
-    window.addEventListener("popstate", checkSessionAndPath);
-    return () => {
-      window.removeEventListener("popstate", checkSessionAndPath);
-    };
+    }
   }, []);
 
   const handleLoginSuccess = (user: EmployeeProfile) => {
-    // Sync URL path with logged-in user role
-    if (user.role === "admin" && !window.location.pathname.startsWith("/admin")) {
-      window.history.pushState({}, "", "/admin");
-    } else if (user.role !== "admin" && window.location.pathname.startsWith("/admin")) {
-      window.history.pushState({}, "", "/");
-    }
-
     setCurrentUser(user);
     localStorage.setItem("expense_flow_user", JSON.stringify(user));
     // Default to dashboard after logging in
