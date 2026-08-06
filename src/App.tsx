@@ -66,10 +66,10 @@ export default function App() {
   return (
     <div id="app-main-wrapper" className="flex min-h-screen bg-slate-50">
       {/* Sidebar Navigation */}
-      <Sidebar 
-        activeTab={activeTab} 
-        onTabChange={(tab) => setActiveTab(tab)} 
-        user={currentUser} 
+      <Sidebar
+        activeTab={activeTab}
+        onTabChange={(tab) => setActiveTab(tab)}
+        user={currentUser}
         isMobileOpen={isMobileSidebarOpen}
         onClose={() => setIsMobileSidebarOpen(false)}
         onLogout={handleLogout}
@@ -78,13 +78,13 @@ export default function App() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         {/* Top Navbar */}
-        <Navbar 
-          user={currentUser} 
-          onLogout={handleLogout} 
+        <Navbar
+          user={currentUser}
+          onLogout={handleLogout}
           onViewProfile={() => {
             setActiveTab("profile");
             setIsMobileSidebarOpen(false);
-          }} 
+          }}
           onViewNotifications={() => {
             setActiveTab("expenses");
             setIsMobileSidebarOpen(false);
@@ -110,18 +110,18 @@ export default function App() {
             >
               {activeTab === "dashboard" && (
                 currentUser.role === "admin" ? (
-                  <AdminDashboard 
-                    user={currentUser} 
+                  <AdminDashboard
+                    user={currentUser}
                     onNavigateToQueue={(expenseId) => {
                       setActiveTab("expenses");
                       if (expenseId) setTargetExpenseId(expenseId);
-                    }} 
+                    }}
                     refreshTrigger={refreshTrigger}
                   />
                 ) : (
-                  <EmployeeDashboard 
-                    user={currentUser} 
-                    onNavigateToSubmit={() => setActiveTab("submit")} 
+                  <EmployeeDashboard
+                    user={currentUser}
+                    onNavigateToSubmit={() => setActiveTab("submit")}
                     onNavigateToExpenses={() => setActiveTab("expenses")}
                     refreshTrigger={refreshTrigger}
                   />
@@ -129,50 +129,50 @@ export default function App() {
               )}
 
               {activeTab === "submit" && (
-                <ExpenseForm 
-                  user={currentUser} 
+                <ExpenseForm
+                  user={currentUser}
                   onSuccess={() => {
                     triggerRefresh();
                     setActiveTab("expenses");
-                  }} 
+                  }}
                 />
               )}
 
               {activeTab === "expenses" && (
-                <ExpenseList 
-                  user={currentUser} 
-                  refreshTrigger={refreshTrigger} 
+                <ExpenseList
+                  user={currentUser}
+                  refreshTrigger={refreshTrigger}
                   targetExpenseId={targetExpenseId}
                   onClearTargetExpense={() => setTargetExpenseId(null)}
                 />
               )}
 
               {activeTab === "profile" && (
-                <ProfileView 
-                  user={currentUser} 
-                  onProfileUpdate={handleProfileUpdate} 
+                <ProfileView
+                  user={currentUser}
+                  onProfileUpdate={handleProfileUpdate}
                 />
               )}
 
               {activeTab === "analytics" && (
-                <AnalyticsHub 
-                  user={currentUser} 
-                  refreshTrigger={refreshTrigger} 
+                <AnalyticsHub
+                  user={currentUser}
+                  refreshTrigger={refreshTrigger}
                 />
               )}
 
               {activeTab === "reports" && (
-                <Reports 
-                  user={currentUser} 
-                  refreshTrigger={refreshTrigger} 
+                <Reports
+                  user={currentUser}
+                  refreshTrigger={refreshTrigger}
                 />
               )}
 
               {activeTab === "bills" && (
                 <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-                  <BillDocumentHub 
-                    user={currentUser} 
-                    refreshTrigger={refreshTrigger} 
+                  <BillDocumentHub
+                    user={currentUser}
+                    refreshTrigger={refreshTrigger}
                   />
                 </div>
               )}
