@@ -23,7 +23,7 @@ import {
   Radar, 
   Legend 
 } from "recharts";
-import { BarChart2, TrendingUp, Award, IndianRupee, Wallet, RefreshCw } from "lucide-react";
+import { BarChart2, TrendingUp, Award, IndianRupee, Wallet, RefreshCw, Calendar } from "lucide-react";
 
 interface AnalyticsHubProps {
   user: EmployeeProfile;
@@ -58,19 +58,52 @@ export default function AnalyticsHub({ user, refreshTrigger }: AnalyticsHubProps
     fetchExpensesAndEmployees();
   }, [user.employeeId, refreshTrigger]);
 
+  // Time Period Filter
+  const now = new Date();
+  const currentMonthIdx = now.getMonth();
+  const currentYearNum = now.getFullYear();
+
+  const [selectedMonth, setSelectedMonth] = useState<number>(currentMonthIdx);
+  const [selectedYear, setSelectedYear] = useState<number>(currentYearNum);
+  const [isAllTime, setIsAllTime] = useState<boolean>(false);
+
+  const MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June", 
+    "July", "August", "September", "October", "November", "December"
+  ];
+
+  const selectedMonthName = MONTH_NAMES[selectedMonth];
+  const isCurrentMonthSelected = selectedMonth === currentMonthIdx && selectedYear === currentYearNum;
+
+  const isDateInMonth = (dateStr: string, monthIdx: number, yearNum: number) => {
+    if (!dateStr) return false;
+    const parts = dateStr.split("-");
+    if (parts.length === 3) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      return y === yearNum && m === monthIdx;
+    }
+    const d = new Date(dateStr);
+    return d.getFullYear() === yearNum && d.getMonth() === monthIdx;
+  };
+
+  const activeExpenses = isAllTime
+    ? expenses
+    : expenses.filter(e => isDateInMonth(e.date, selectedMonth, selectedYear));
+
   // Calculations
-  const averageClaim = expenses.length > 0 
-    ? parseFloat((expenses.reduce((sum, e) => sum + e.totalAmount, 0) / expenses.length).toFixed(2))
+  const averageClaim = activeExpenses.length > 0 
+    ? parseFloat((activeExpenses.reduce((sum, e) => sum + e.totalAmount, 0) / activeExpenses.length).toFixed(2))
     : 0;
 
-  const maxClaim = expenses.length > 0
-    ? Math.max(...expenses.map(e => e.totalAmount))
+  const maxClaim = activeExpenses.length > 0
+    ? Math.max(...activeExpenses.map(e => e.totalAmount))
     : 0;
 
   // Chart: Type of Expense Spending (Category)
   const expenseTypeSpendingData = () => {
     const totals: { [key: string]: number } = {};
-    expenses.forEach(e => {
+    activeExpenses.forEach(e => {
       const type = e.category || "Miscellaneous";
       totals[type] = (totals[type] || 0) + e.totalAmount;
     });
@@ -84,7 +117,7 @@ export default function AnalyticsHub({ user, refreshTrigger }: AnalyticsHubProps
   // Chart 2: Payment Methods Usage
   const paymentMethodData = () => {
     const methods: { [key: string]: number } = { UPI: 0, "Credit Card": 0, "Debit Card": 0, Cash: 0, "Bank Transfer": 0 };
-    expenses.forEach(e => {
+    activeExpenses.forEach(e => {
       if (methods[e.paymentMethod] !== undefined) {
         methods[e.paymentMethod] += e.totalAmount;
       }
@@ -114,6 +147,74 @@ export default function AnalyticsHub({ user, refreshTrigger }: AnalyticsHubProps
         <h2 className="text-xl font-bold text-slate-900 font-sans">Advanced Spending Analytics</h2>
       </div>
 
+      {/* Time Period Filter Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-100 shadow-2xs">
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-indigo-600" />
+          <span className="text-xs font-bold text-slate-800">
+            {isAllTime ? "All-Time Spending Analytics" : `Spending Analytics for ${selectedMonthName} ${selectedYear}`}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+          {/* Month & Year Selectors */}
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200/70">
+            <select
+              value={selectedMonth}
+              onChange={(e) => {
+                setSelectedMonth(parseInt(e.target.value, 10));
+                setIsAllTime(false);
+              }}
+              className="bg-white text-indigo-700 font-extrabold px-2.5 py-1 rounded-lg border border-slate-200/60 shadow-2xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs"
+            >
+              {MONTH_NAMES.map((m, idx) => (
+                <option key={m} value={idx}>{m}</option>
+              ))}
+            </select>
+
+            <select
+              value={selectedYear}
+              onChange={(e) => {
+                setSelectedYear(parseInt(e.target.value, 10));
+                setIsAllTime(false);
+              }}
+              className="bg-white text-indigo-700 font-extrabold px-2.5 py-1 rounded-lg border border-slate-200/60 shadow-2xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs"
+            >
+              {[2024, 2025, 2026, 2027].map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Quick "Current Month" button */}
+          {(!isCurrentMonthSelected || isAllTime) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedMonth(currentMonthIdx);
+                setSelectedYear(currentYearNum);
+                setIsAllTime(false);
+              }}
+              className="px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-xl transition cursor-pointer text-xs font-bold"
+            >
+              Current Month
+            </button>
+          )}
+
+          {/* All Time toggle */}
+          <button
+            type="button"
+            onClick={() => setIsAllTime(!isAllTime)}
+            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer border ${
+              isAllTime
+                ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs font-extrabold"
+                : "bg-slate-100 text-slate-500 border-slate-200 hover:text-slate-800 font-bold"
+            }`}
+          >
+            🌐 All Time
+          </button>
+        </div>
+      </div>
+
       {/* Numerical Highlights */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm flex items-center gap-4">
@@ -121,7 +222,9 @@ export default function AnalyticsHub({ user, refreshTrigger }: AnalyticsHubProps
             <IndianRupee className="h-5 w-5" />
           </span>
           <div>
-            <span className="block text-[10px] uppercase font-bold text-slate-400">Average Claim Size</span>
+            <span className="block text-[10px] uppercase font-bold text-slate-400">
+              {isAllTime ? "Average Claim Size (All Time)" : `Average Claim (${selectedMonthName})`}
+            </span>
             <span className="block text-xl font-black text-slate-800 font-mono">₹{averageClaim.toFixed(2)}</span>
           </div>
         </div>
@@ -131,7 +234,9 @@ export default function AnalyticsHub({ user, refreshTrigger }: AnalyticsHubProps
             <Award className="h-5 w-5" />
           </span>
           <div>
-            <span className="block text-[10px] uppercase font-bold text-slate-400">Highest Claim Submitted</span>
+            <span className="block text-[10px] uppercase font-bold text-slate-400">
+              {isAllTime ? "Highest Claim (All Time)" : `Highest Claim (${selectedMonthName})`}
+            </span>
             <span className="block text-xl font-black text-slate-800 font-mono">₹{maxClaim.toFixed(2)}</span>
           </div>
         </div>
@@ -141,8 +246,10 @@ export default function AnalyticsHub({ user, refreshTrigger }: AnalyticsHubProps
             <Wallet className="h-5 w-5" />
           </span>
           <div>
-            <span className="block text-[10px] uppercase font-bold text-slate-400">Total Audit Volume</span>
-            <span className="block text-xl font-black text-slate-800 font-mono">{expenses.length} claims</span>
+            <span className="block text-[10px] uppercase font-bold text-slate-400">
+              {isAllTime ? "Total Audit Volume (All Time)" : `Audit Volume (${selectedMonthName})`}
+            </span>
+            <span className="block text-xl font-black text-slate-800 font-mono">{activeExpenses.length} claims</span>
           </div>
         </div>
       </div>
@@ -153,7 +260,7 @@ export default function AnalyticsHub({ user, refreshTrigger }: AnalyticsHubProps
         <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm space-y-4">
           <div className="border-b border-slate-50 pb-3">
             <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-              Spending by Type of Expense
+              {isAllTime ? "Spending by Category (All Time)" : `Spending by Category (${selectedMonthName} ${selectedYear})`}
             </h3>
           </div>
 

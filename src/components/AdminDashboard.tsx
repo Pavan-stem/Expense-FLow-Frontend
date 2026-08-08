@@ -53,20 +53,7 @@ import {
   CheckCircle,
   AlertCircle
 } from "lucide-react";
-import { 
-  ResponsiveContainer, 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  Tooltip, 
-  PieChart, 
-  Pie, 
-  Cell, 
-  Legend, 
-  LineChart, 
-  Line 
-} from "recharts";
+
 
 interface AdminDashboardProps {
   user: EmployeeProfile;
@@ -81,6 +68,27 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
   const [newCatName, setNewCatName] = useState("");
   const [catMessage, setCatMessage] = useState("");
   const [loading, setLoading] = useState(true);
+
+  // Time Period Filter
+  const now = new Date();
+  const currentMonthIdx = now.getMonth();
+  const currentYearNum = now.getFullYear();
+
+  const [selectedMonth, setSelectedMonth] = useState<number>(currentMonthIdx);
+  const [selectedYear, setSelectedYear] = useState<number>(currentYearNum);
+  const [isAllTime, setIsAllTime] = useState<boolean>(false);
+
+  const MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June", 
+    "July", "August", "September", "October", "November", "December"
+  ];
+
+  const selectedMonthName = MONTH_NAMES[selectedMonth];
+  const isCurrentMonthSelected = selectedMonth === currentMonthIdx && selectedYear === currentYearNum;
+
+  // Employee Monthly Breakdown Controls
+  const [empSearchQuery, setEmpSearchQuery] = useState("");
+  const [empSortBy, setEmpSortBy] = useState<"total" | "approved" | "name" | "claims">("total");
 
   // Remarks state inside viewingVoucherDetails modal
   const [adminModalRemark, setAdminModalRemark] = useState("");
@@ -430,108 +438,139 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
     }
   };
 
+  // Timezone-safe Date in Month check
+  const isDateInMonth = (dateStr: string, monthIdx: number, yearNum: number) => {
+    if (!dateStr) return false;
+    const parts = dateStr.split("-");
+    if (parts.length === 3) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      return y === yearNum && m === monthIdx;
+    }
+    const d = new Date(dateStr);
+    return d.getFullYear() === yearNum && d.getMonth() === monthIdx;
+  };
+
+  // Filtered expenses based on active selection
+  const activeExpenses = isAllTime
+    ? expenses
+    : expenses.filter(e => isDateInMonth(e.date, selectedMonth, selectedYear));
+
   // KPI Calculations
   const totalEmployees = employees.length;
-  const totalClaims = expenses.length;
+  const totalClaims = activeExpenses.length;
   
-  const pendingClaimsCount = expenses.filter(e => e.status === "pending" || e.status === "under_review").length;
+  const pendingClaimsCount = activeExpenses.filter(e => e.status === "pending" || e.status === "under_review").length;
   
   const totalApprovedAmount = expenses
+    .filter(exp => isDateInMonth(exp.date, selectedMonth, selectedYear))
     .filter(e => e.status === "approved" || e.status === "reimbursed")
     .reduce((sum, e) => sum + e.totalAmount, 0);
 
-  const totalRejectedAmount = expenses
+  const totalRejectedAmount = activeExpenses
     .filter(e => e.status === "rejected")
     .reduce((sum, e) => sum + e.totalAmount, 0);
 
-  // Spending for current month
-  const currentMonthName = new Date().toLocaleString("default", { month: "long" });
-  const currentYear = new Date().getFullYear();
-  const currentMonthSpending = expenses
-    .filter(exp => {
-      const d = new Date(exp.date);
-      return d.toLocaleString("default", { month: "long" }) === currentMonthName && d.getFullYear() === currentYear;
-    })
+  const selectedMonthSpending = expenses
+    .filter(exp => isDateInMonth(exp.date, selectedMonth, selectedYear))
     .reduce((sum, e) => sum + e.totalAmount, 0);
 
-  // Charts data
-  // 1. Monthly Expenses
-  const monthlyExpensesData = () => {
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const now = new Date();
-    const currentYr = now.getFullYear();
+  // Employee Monthly Breakdown Data Helper
+  const getEmployeeMonthlyTotals = () => {
+    const empMap: {
+      [key: string]: {
+        id: string;
+        name: string;
+        email: string;
+        role: string;
+        employeeId: string;
+        totalAmount: number;
+        approvedAmount: number;
+        pendingAmount: number;
+        rejectedAmount: number;
+        claimsCount: number;
+      };
+    } = {};
 
-    return months.map((m, idx) => {
-      const monthExpenses = expenses.filter(exp => {
-        const d = new Date(exp.date);
-        return d.getMonth() === idx && d.getFullYear() === currentYr;
-      });
-      const total = monthExpenses.reduce((sum, exp) => sum + exp.totalAmount, 0);
-      return { name: m, TotalSpent: parseFloat(total.toFixed(2)) };
+    // 1. Seed with registered employees from DB
+    employees.forEach(emp => {
+      const key = (emp.email || emp.employeeId || emp.name).toLowerCase().trim();
+      empMap[key] = {
+        id: emp.id || emp.employeeId,
+        name: emp.name || "Employee",
+        email: emp.email || "N/A",
+        role: emp.role || "employee",
+        employeeId: emp.employeeId || emp.id || "",
+        totalAmount: 0,
+        approvedAmount: 0,
+        pendingAmount: 0,
+        rejectedAmount: 0,
+        claimsCount: 0
+      };
     });
-  };
 
-  // 2. Employee-wise spending
-  const employeeSpendingData = () => {
-    const empMap: { [key: string]: { name: string, amount: number } } = {};
-    expenses.forEach(e => {
-      // Find matching employee profile if available to get canonical name/ID
+    // 2. Aggregate activeExpenses for the selected month/year filter
+    activeExpenses.forEach(exp => {
       const matchedProfile = employees.find(emp => 
-        (emp.email && e.employeeEmail && emp.email.toLowerCase().trim() === e.employeeEmail.toLowerCase().trim()) ||
-        (emp.employeeId && e.employeeId && emp.employeeId.toLowerCase().trim() === e.employeeId.toLowerCase().trim()) ||
-        (emp.name && e.employeeName && emp.name.toLowerCase().trim() === e.employeeName.toLowerCase().trim())
+        (emp.email && exp.employeeEmail && emp.email.toLowerCase().trim() === exp.employeeEmail.toLowerCase().trim()) ||
+        (emp.employeeId && exp.employeeId && emp.employeeId.toLowerCase().trim() === exp.employeeId.toLowerCase().trim()) ||
+        (emp.name && exp.employeeName && emp.name.toLowerCase().trim() === exp.employeeName.toLowerCase().trim())
       );
 
-      const rawName = matchedProfile?.name || e.employeeName || e.employeeId || "Employee";
-      const cleanKey = (matchedProfile?.email || rawName).toLowerCase().trim();
+      const rawName = matchedProfile?.name || exp.employeeName || exp.employeeId || "Employee";
+      const key = (matchedProfile?.email || exp.employeeEmail || rawName).toLowerCase().trim();
 
-      const formattedName = matchedProfile?.name || 
-        (rawName.trim().charAt(0).toUpperCase() + rawName.trim().slice(1));
-
-      if (!empMap[cleanKey]) {
-        empMap[cleanKey] = { name: formattedName, amount: 0 };
+      if (!empMap[key]) {
+        empMap[key] = {
+          id: matchedProfile?.id || exp.employeeId || key,
+          name: matchedProfile?.name || (rawName.trim().charAt(0).toUpperCase() + rawName.trim().slice(1)),
+          email: matchedProfile?.email || exp.employeeEmail || "N/A",
+          role: matchedProfile?.role || "employee",
+          employeeId: exp.employeeId || matchedProfile?.employeeId || "",
+          totalAmount: 0,
+          approvedAmount: 0,
+          pendingAmount: 0,
+          rejectedAmount: 0,
+          claimsCount: 0
+        };
       }
-      empMap[cleanKey].amount += (e.totalAmount || e.amount || 0);
-    });
 
-    return Object.values(empMap)
-      .map(v => ({ name: v.name, Spent: parseFloat(v.amount.toFixed(2)) }))
-      .sort((a, b) => b.Spent - a.Spent)
-      .slice(0, 6);
-  };
+      const amt = exp.totalAmount || exp.amount || 0;
+      empMap[key].totalAmount += amt;
+      empMap[key].claimsCount += 1;
 
-  // 3. Category-wise Expenses
-  const categorySpendingData = () => {
-    const catMap: { [key: string]: number } = {};
-    expenses.forEach(e => {
-      catMap[e.category] = (catMap[e.category] || 0) + e.totalAmount;
-    });
-
-    return Object.keys(catMap).map(k => ({
-      name: k,
-      value: parseFloat(catMap[k].toFixed(2))
-    })).sort((a, b) => b.value - a.value);
-  };
-
-  // 4. Approval stats
-  const approvalStatsData = () => {
-    const statusCounts = { pending: 0, under_review: 0, approved: 0, rejected: 0, reimbursed: 0 };
-    expenses.forEach(e => {
-      if (statusCounts[e.status] !== undefined) {
-        statusCounts[e.status]++;
+      if (exp.status === "approved" || exp.status === "reimbursed") {
+        empMap[key].approvedAmount += amt;
+      } else if (exp.status === "pending" || exp.status === "under_review") {
+        empMap[key].pendingAmount += amt;
+      } else if (exp.status === "rejected") {
+        empMap[key].rejectedAmount += amt;
       }
     });
 
-    return [
-      { name: "Pending", count: statusCounts.pending, fill: "#f59e0b" },
-      { name: "Under Review", count: statusCounts.under_review, fill: "#0ea5e9" },
-      { name: "Approved", count: statusCounts.approved, fill: "#10b981" },
-      { name: "Rejected", count: statusCounts.rejected, fill: "#f43f5e" },
-      { name: "Reimbursed", count: statusCounts.reimbursed, fill: "#a855f7" }
-    ].filter(s => s.count > 0);
-  };
+    let list = Object.values(empMap);
 
-  const COLORS = ["#4f46e5", "#06b6d4", "#f59e0b", "#ec4899", "#8b5cf6", "#10b981", "#64748b"];
+    // Apply search filter
+    if (empSearchQuery.trim()) {
+      const q = empSearchQuery.toLowerCase().trim();
+      list = list.filter(e => 
+        e.name.toLowerCase().includes(q) || 
+        e.email.toLowerCase().includes(q) || 
+        e.employeeId.toLowerCase().includes(q)
+      );
+    }
+
+    // Apply sorting
+    list.sort((a, b) => {
+      if (empSortBy === "total") return b.totalAmount - a.totalAmount;
+      if (empSortBy === "approved") return b.approvedAmount - a.approvedAmount;
+      if (empSortBy === "claims") return b.claimsCount - a.claimsCount;
+      if (empSortBy === "name") return a.name.localeCompare(b.name);
+      return 0;
+    });
+
+    return list;
+  };
 
   if (loading) {
     return (
@@ -595,6 +634,75 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         </div>
       </div>
 
+      {/* Time Period Filter Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-100 shadow-2xs">
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-indigo-600" />
+          <span className="text-xs font-bold text-slate-800">
+            {isAllTime ? "All-Time Corporate Statistics" : `Statistics for ${selectedMonthName} ${selectedYear}`}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+          {/* Month & Year Selectors */}
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200/70">
+            <select
+              value={selectedMonth}
+              onChange={(e) => {
+                setSelectedMonth(parseInt(e.target.value, 10));
+                setIsAllTime(false);
+              }}
+              className="bg-white text-indigo-700 font-extrabold px-2.5 py-1 rounded-lg border border-slate-200/60 shadow-2xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs"
+            >
+              {MONTH_NAMES.map((m, idx) => (
+                <option key={m} value={idx}>{m}</option>
+              ))}
+            </select>
+
+            <select
+              value={selectedYear}
+              onChange={(e) => {
+                setSelectedYear(parseInt(e.target.value, 10));
+                setIsAllTime(false);
+              }}
+              className="bg-white text-indigo-700 font-extrabold px-2.5 py-1 rounded-lg border border-slate-200/60 shadow-2xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs"
+            >
+              {[2024, 2025, 2026, 2027].map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Quick "Current Month" button */}
+          {(!isCurrentMonthSelected || isAllTime) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedMonth(currentMonthIdx);
+                setSelectedYear(currentYearNum);
+                setIsAllTime(false);
+              }}
+              className="px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-xl transition cursor-pointer text-xs font-bold"
+            >
+              Current Month
+            </button>
+          )}
+
+          {/* All Time toggle */}
+          <button
+            type="button"
+            id="kpi-filter-all-btn"
+            onClick={() => setIsAllTime(!isAllTime)}
+            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer border ${
+              isAllTime
+                ? "bg-indigo-600 text-white border-indigo-600 shadow-2xs font-extrabold"
+                : "bg-slate-100 text-slate-500 border-slate-200 hover:text-slate-800 font-bold"
+            }`}
+          >
+            🌐 All Time
+          </button>
+        </div>
+      </div>
+
       {/* KPI Cards Row */}
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
         {/* KPI 1 */}
@@ -610,7 +718,9 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
           <div className="flex items-center gap-2 text-slate-400">
             <FileCheck className="h-4 w-4 text-emerald-600" />
-            <span className="text-[9px] uppercase font-bold tracking-wider">Claims Sent</span>
+            <span className="text-[9px] uppercase font-bold tracking-wider">
+              {isAllTime ? "Claims (All Time)" : `Claims (${selectedMonthName})`}
+            </span>
           </div>
           <span className="block text-lg font-black text-slate-800 mt-2 font-mono">{totalClaims}</span>
         </div>
@@ -619,7 +729,9 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
           <div className="flex items-center gap-2 text-slate-400">
             <Coins className="h-4 w-4 text-purple-600" />
-            <span className="text-[9px] uppercase font-bold tracking-wider">Approved (₹)</span>
+            <span className="text-[9px] uppercase font-bold tracking-wider">
+              {isAllTime ? "Approved (Selected Month)" : `Approved (${selectedMonthName})`}
+            </span>
           </div>
           <span className="block text-lg font-black text-slate-800 mt-2 font-mono">₹{totalApprovedAmount.toFixed(2)}</span>
         </div>
@@ -628,7 +740,9 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
           <div className="flex items-center gap-2 text-slate-400">
             <ShieldAlert className="h-4 w-4 text-amber-600" />
-            <span className="text-[9px] uppercase font-bold tracking-wider">Pending Audit</span>
+            <span className="text-[9px] uppercase font-bold tracking-wider">
+              {isAllTime ? "Pending Audit" : `Pending (${selectedMonthName})`}
+            </span>
           </div>
           <span className="block text-lg font-black text-slate-800 mt-2 font-mono">{pendingClaimsCount}</span>
         </div>
@@ -637,7 +751,9 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
           <div className="flex items-center gap-2 text-slate-400">
             <FileMinus className="h-4 w-4 text-rose-600" />
-            <span className="text-[9px] uppercase font-bold tracking-wider">Rejected (₹)</span>
+            <span className="text-[9px] uppercase font-bold tracking-wider">
+              {isAllTime ? "Rejected (All Time)" : `Rejected (${selectedMonthName})`}
+            </span>
           </div>
           <span className="block text-lg font-black text-slate-800 mt-2 font-mono">₹{totalRejectedAmount.toFixed(2)}</span>
         </div>
@@ -646,30 +762,133 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
           <div className="flex items-center gap-2 text-slate-400">
             <TrendingUp className="h-4 w-4 text-teal-600" />
-            <span className="text-[9px] uppercase font-bold tracking-wider">Month Spent</span>
+            <span className="text-[9px] uppercase font-bold tracking-wider">
+              {isAllTime ? "Total Spent (All Time)" : `Spent (${selectedMonthName})`}
+            </span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono">₹{currentMonthSpending.toFixed(2)}</span>
+          <span className="block text-lg font-black text-slate-800 mt-2 font-mono">₹{selectedMonthSpending.toFixed(2)}</span>
         </div>
       </div>
 
-      {/* Main Charts Row */}
+      {/* Employee Monthly Expense Summary Section (Replacing Charts & Bargraphs) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Chart 1: Monthly Expenditures */}
+        {/* Main Panel: Employee Monthly Expense Breakdown */}
         <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm space-y-4 lg:col-span-2">
-          <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Monthly Spend Trends</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={monthlyExpensesData()}>
-                <XAxis dataKey="name" fontSize={10} stroke="#94a3b8" tickLine={false} axisLine={false} />
-                <YAxis fontSize={10} stroke="#94a3b8" tickLine={false} axisLine={false} />
-                <Tooltip formatter={(value) => [`₹${value}`, "Amount"]} contentStyle={{ fontSize: "11px", borderRadius: "8px" }} />
-                <Line type="monotone" dataKey="TotalSpent" stroke="#4f46e5" strokeWidth={3} dot={{ fill: "#4f46e5" }} />
-              </LineChart>
-            </ResponsiveContainer>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-indigo-600" />
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  Employee Monthly Expenses ({isAllTime ? "All-Time Corporate Summary" : `${selectedMonthName} ${selectedYear}`})
+                </h3>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Total monthly expense amount claimed by each and every employee for {isAllTime ? "all time" : `${selectedMonthName} ${selectedYear}`}.
+              </p>
+            </div>
+
+            {/* Controls: Search & Sort */}
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search staff..."
+                  value={empSearchQuery}
+                  onChange={(e) => setEmpSearchQuery(e.target.value)}
+                  className="pl-8 pr-3 py-1 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 w-36 sm:w-44"
+                />
+              </div>
+
+              <select
+                value={empSortBy}
+                onChange={(e) => setEmpSortBy(e.target.value as any)}
+                className="py-1 px-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-semibold cursor-pointer focus:outline-none"
+              >
+                <option value="total">Sort: Highest Total</option>
+                <option value="approved">Sort: Approved Amount</option>
+                <option value="claims">Sort: Claims Count</option>
+                <option value="name">Sort: Name A-Z</option>
+              </select>
+            </div>
           </div>
+
+          {/* List of Employees with Monthly Totals */}
+          {getEmployeeMonthlyTotals().length === 0 ? (
+            <div className="p-8 text-center text-slate-400 text-xs italic">
+              No employee records found matching filter criteria.
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+              {getEmployeeMonthlyTotals().map((empItem) => {
+                return (
+                  <div 
+                    key={empItem.id} 
+                    className="p-3.5 bg-slate-50/70 hover:bg-indigo-50/30 border border-slate-200/60 rounded-xl transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    {/* Employee Profile Info */}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-full bg-indigo-600 text-white font-extrabold text-xs flex items-center justify-center shadow-xs shrink-0">
+                        {empItem.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-xs text-slate-800 truncate">{empItem.name}</span>
+                          <span className={`px-1.5 py-0.2 text-[8px] font-extrabold uppercase rounded border ${
+                            empItem.role === "admin" 
+                              ? "bg-purple-100 text-purple-700 border-purple-200" 
+                              : "bg-slate-100 text-slate-600 border-slate-200"
+                          }`}>
+                            {empItem.role}
+                          </span>
+                          {empItem.employeeId && (
+                            <span className="text-[9px] font-mono text-slate-400">ID: {empItem.employeeId}</span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-400 truncate block">{empItem.email}</span>
+                      </div>
+                    </div>
+
+                    {/* Breakdown Badges & Total Amount */}
+                    <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+                      {/* Sub-breakdown: Approved, Pending, Rejected */}
+                      <div className="flex items-center gap-1.5 text-[9px] font-bold">
+                        <span className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg border border-emerald-100" title="Approved amount for selected month">
+                          ✓ ₹{empItem.approvedAmount.toFixed(0)}
+                        </span>
+                        {empItem.pendingAmount > 0 && (
+                          <span className="px-2 py-1 bg-amber-50 text-amber-700 rounded-lg border border-amber-100" title="Pending amount for selected month">
+                            ⏳ ₹{empItem.pendingAmount.toFixed(0)}
+                          </span>
+                        )}
+                        {empItem.rejectedAmount > 0 && (
+                          <span className="px-2 py-1 bg-rose-50 text-rose-700 rounded-lg border border-rose-100" title="Rejected amount for selected month">
+                            ✕ ₹{empItem.rejectedAmount.toFixed(0)}
+                          </span>
+                        )}
+                        <span className="px-2 py-1 bg-slate-200/60 text-slate-700 rounded-lg font-mono" title="Total claim items count">
+                          {empItem.claimsCount} claims
+                        </span>
+                      </div>
+
+                      {/* Total Monthly Amount */}
+                      <div className="text-right min-w-[100px]">
+                        <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">
+                          {isAllTime ? "Total Spent" : "Monthly Total"}
+                        </span>
+                        <span className="text-sm font-black text-indigo-900 font-mono">
+                          ₹{empItem.totalAmount.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Component: Add Category & Category List */}
+        {/* Side Panel: Manage categories */}
         <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm flex flex-col justify-between space-y-4">
           <div>
             <div className="flex items-center gap-2 border-b border-slate-50 pb-2.5 mb-3">
@@ -702,98 +921,16 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
             )}
           </div>
 
-          <div className="flex-1 mt-4 overflow-y-auto max-h-36 border-t border-slate-50 pt-3">
+          <div className="flex-1 mt-4 overflow-y-auto max-h-64 border-t border-slate-50 pt-3">
             <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Category list</span>
             <div className="flex flex-wrap gap-1.5">
               {categories.map(cat => (
-                <span key={cat.id} className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded text-[9px] font-semibold border border-slate-200/50">
+                <span key={cat.id} className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-[10px] font-semibold border border-slate-200/60">
                   {cat.name}
                 </span>
               ))}
             </div>
           </div>
-        </div>
-      </div>
-
-      {/* Secondary Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Chart 2: Employee Spending comparison */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm space-y-4">
-          <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Top 6 Employee Expenses</h3>
-          {employeeSpendingData().length === 0 ? (
-            <div className="h-56 flex items-center justify-center text-xs text-slate-400 italic">No employee expense logs.</div>
-          ) : (
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={employeeSpendingData()} layout="vertical">
-                  <XAxis type="number" fontSize={9} stroke="#94a3b8" tickLine={false} axisLine={false} />
-                  <YAxis type="category" dataKey="name" fontSize={9} stroke="#94a3b8" tickLine={false} axisLine={false} width={60} />
-                  <Tooltip formatter={(value) => `₹${value}`} contentStyle={{ fontSize: "10px" }} />
-                  <Bar dataKey="Spent" fill="#4f46e5" radius={[0, 4, 4, 0]} barSize={10} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-
-        {/* Chart 3: Category Wise Spending */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm space-y-4">
-          <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Enterprise spending by category</h3>
-          {categorySpendingData().length === 0 ? (
-            <div className="h-56 flex items-center justify-center text-xs text-slate-400 italic">No spending logs.</div>
-          ) : (
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={categorySpendingData()}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={40}
-                    outerRadius={55}
-                    paddingAngle={3}
-                    dataKey="value"
-                  >
-                    {categorySpendingData().map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => `₹${value}`} contentStyle={{ fontSize: "10px" }} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="flex flex-wrap gap-x-3 gap-y-1 justify-center text-[8px] mt-1 text-slate-500 font-semibold max-h-12 overflow-y-auto">
-                {categorySpendingData().map((entry, index) => (
-                  <div key={entry.name} className="flex items-center gap-1">
-                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                    <span>{entry.name}: ₹{entry.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Chart 4: Approval Statistics */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm space-y-4">
-          <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Claim Approval Statistics (Count)</h3>
-          {approvalStatsData().length === 0 ? (
-            <div className="h-56 flex items-center justify-center text-xs text-slate-400 italic">No historical status records.</div>
-          ) : (
-            <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={approvalStatsData()}>
-                  <XAxis dataKey="name" fontSize={9} stroke="#94a3b8" tickLine={false} axisLine={false} />
-                  <YAxis fontSize={9} stroke="#94a3b8" tickLine={false} axisLine={false} />
-                  <Tooltip formatter={(value) => [`${value} Claims`, "Quantity"]} contentStyle={{ fontSize: "10px" }} />
-                  <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                    {approvalStatsData().map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.fill} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
         </div>
       </div>
 
