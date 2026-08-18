@@ -25,6 +25,7 @@ import {
   exportBillsToWordDocx, 
   exportBillsToPDF 
 } from "../lib/billDocumentGenerator";
+import EditExpenseModal from "./EditExpenseModal";
 import { 
   Search, 
   Filter, 
@@ -65,6 +66,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
   const [loading, setLoading] = useState(true);
   const [previewingBill, setPreviewingBill] = useState<BillFile | null>(null);
   const [deletingExpense, setDeletingExpense] = useState<Expense | null>(null);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
   // Localized image zoom & pan state for preview modal
   const [zoomScale, setZoomScale] = useState(1);
@@ -589,9 +591,9 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
     if (!dateStr) return "";
     const parts = dateStr.split("-");
     if (parts.length === 3 && parts[0].length === 4) {
-      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      return `\t${parts[2]}/${parts[1]}/${parts[0]}`;
     }
-    return dateStr;
+    return `\t${dateStr}`;
   };
 
   const handleExportExcel = () => {
@@ -626,7 +628,11 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       }
 
       const typeOfExpense = exp.title || exp.category || "";
-      const methodOfPayment = (paymentMethod === "Bank Transfer" || paymentMethod === "Credit Card")
+      const methodOfPayment = exp.paymentMethod?.includes("SW Payment")
+        ? "SW Payment"
+        : exp.paymentMethod?.includes("Personal Payment")
+        ? "Personal Payment"
+        : (paymentMethod === "Bank Transfer" || paymentMethod === "Credit Card")
         ? "SW Payment"
         : "Personal Payment";
       const swPaymentStatus = exp.status === "reimbursed" ? "Paid" : exp.status === "approved" ? "Approved" : "";
@@ -902,8 +908,14 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                       {exp.vendor}
                     </td>
                     <td className="py-3.5 px-4 whitespace-nowrap">
-                      <span className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold border border-slate-200 uppercase font-mono tracking-wider">
-                        {exp.paymentMethod || "UPI"}
+                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border uppercase font-mono tracking-wider ${
+                        exp.paymentMethod?.includes("SW Payment")
+                          ? "bg-purple-50 text-purple-700 border-purple-200"
+                          : exp.paymentMethod?.includes("Personal Payment")
+                          ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                          : "bg-slate-100 text-slate-700 border-slate-200"
+                      }`}>
+                        {exp.paymentMethod || "Personal Payment"}
                       </span>
                     </td>
                     <td className="py-3.5 px-4 text-right font-bold text-slate-900 whitespace-nowrap font-mono">
@@ -932,14 +944,24 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                         </button>
                         
                         {(user.role === "admin" || exp.employeeId === user.employeeId) && (
-                          <button
-                            id={`delete-claim-btn-${exp.id}`}
-                            onClick={() => handleDelete(exp)}
-                            className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg border border-slate-100 bg-white transition shadow-sm cursor-pointer"
-                            title="Delete Claim"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          <>
+                            <button
+                              id={`edit-claim-btn-${exp.id}`}
+                              onClick={() => setEditingExpense(exp)}
+                              className="p-1.5 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg border border-slate-100 bg-white transition shadow-sm cursor-pointer"
+                              title="Edit Claim & Bills"
+                            >
+                              <Edit3 className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              id={`delete-claim-btn-${exp.id}`}
+                              onClick={() => handleDelete(exp)}
+                              className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg border border-slate-100 bg-white transition shadow-sm cursor-pointer"
+                              title="Delete Claim"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
                         )}
 
                       </div>
@@ -977,14 +999,32 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                     </p>
                   </div>
                 </div>
-                <button
-                  id="close-claim-modal-btn"
-                  onClick={() => setSelectedExpense(null)}
-                  className="p-1.5 hover:bg-slate-150 text-slate-400 hover:text-slate-600 rounded-xl border border-slate-100 bg-white transition cursor-pointer"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+
+                <div className="flex items-center gap-2">
+                  {(user.role === "admin" || selectedExpense.employeeId === user.employeeId) && (
+                    <button
+                      id="modal-edit-claim-btn"
+                      onClick={() => {
+                        const targetExp = selectedExpense;
+                        setSelectedExpense(null);
+                        setEditingExpense(targetExp);
+                      }}
+                      className="px-3 py-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                      title="Edit Claim Data & Bills"
+                    >
+                      <Edit3 className="h-3.5 w-3.5" /> Edit Claim
+                    </button>
+                  )}
+                  <button
+                    id="close-claim-modal-btn"
+                    onClick={() => setSelectedExpense(null)}
+                    className="p-1.5 hover:bg-slate-150 text-slate-400 hover:text-slate-600 rounded-xl border border-slate-100 bg-white transition cursor-pointer"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
+
 
               {/* Specification Grid */}
               <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6">
@@ -1030,7 +1070,18 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                     <h4 className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Operational details</h4>
                     <div className="space-y-1.5 text-xs text-slate-600">
                       <div><span className="font-semibold text-slate-400">Vendor:</span> {selectedExpense.vendor}</div>
-                      <div><span className="font-semibold text-slate-400">Payment:</span> {selectedExpense.paymentMethod}</div>
+                      <div>
+                        <span className="font-semibold text-slate-400">Payment:</span>{" "}
+                        <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold ${
+                          selectedExpense.paymentMethod?.includes("SW Payment")
+                            ? "bg-purple-50 text-purple-700 border border-purple-100"
+                            : selectedExpense.paymentMethod?.includes("Personal Payment")
+                            ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
+                            : "text-slate-800"
+                        }`}>
+                          {selectedExpense.paymentMethod}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1456,6 +1507,19 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
           </>
         )}
       </AnimatePresence>
+
+      {/* Edit Expense Modal */}
+      <EditExpenseModal
+        expense={editingExpense}
+        currentUser={user}
+        isOpen={!!editingExpense}
+        onClose={() => setEditingExpense(null)}
+        onSuccess={() => {
+          setEditingExpense(null);
+          fetchData();
+        }}
+      />
     </div>
   );
 }
+

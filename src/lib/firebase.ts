@@ -45,6 +45,7 @@ export interface EmployeeProfile {
   manager: string;
   joiningDate: string;
   role: "employee" | "admin";
+  status?: "active" | "deactivated";
 }
 
 export interface BillFile {
@@ -74,7 +75,7 @@ export interface Expense {
   date: string; // YYYY-MM-DD
   amount: number;
   vendor: string;
-  paymentMethod: "Cash" | "UPI" | "UPI+Cash" | "Credit Card" | "Debit Card" | "Bank Transfer";
+  paymentMethod: "Personal Payment" | "SW Payment" | "Cash" | "UPI" | "UPI+Cash" | "Credit Card" | "Debit Card" | "Bank Transfer";
   description: string;
   projectName?: string;
   billNumber?: string;
@@ -762,6 +763,114 @@ export async function updateExpense(
   }
 }
 
+export async function updateExpenseWithBills(
+  expenseId: string,
+  updatedData: Partial<Expense>,
+  newBills: BillFile[],
+  removedBillIds: string[],
+  updaterUserId: string,
+  updaterName: string,
+  updaterRole: "admin" | "employee"
+): Promise<void> {
+  try {
+    const ref = doc(db, "expenses", expenseId);
+    const expSnap = await getDoc(ref);
+    if (!expSnap.exists()) {
+      throw new Error("Expense record not found.");
+    }
+    const oldExpense = expSnap.data() as Expense;
+    const oldDate = oldExpense.date;
+
+    // 1. Delete removed bill chunks
+    for (const billId of removedBillIds) {
+      const q = query(
+        collection(db, "bill_chunks"),
+        where("expenseId", "==", expenseId),
+        where("billId", "==", billId)
+      );
+      const snap = await getDocs(q);
+      for (const d of snap.docs) {
+        await deleteDoc(doc(db, "bill_chunks", d.id));
+      }
+    }
+
+    // 2. Save chunks for new bills and build clean bill metadata
+    const cleanNewBills: BillFile[] = [];
+    for (const bill of newBills) {
+      if (bill.fileData) {
+        await saveBillChunks(expenseId, bill.id, bill.fileData);
+      }
+      cleanNewBills.push({
+        ...bill,
+        fileData: "" // strip data URL before updating main doc
+      });
+    }
+
+    // 3. Assemble combined bill metadata
+    const existingBills = (oldExpense.bills || []).filter(b => !removedBillIds.includes(b.id));
+    const combinedBills = [...existingBills, ...cleanNewBills];
+
+    // 4. Build clean data for updateDoc
+    const payload: Partial<Expense> = {
+      ...updatedData,
+      bills: combinedBills
+    };
+
+    const cleanData: Record<string, any> = {};
+    Object.entries(payload).forEach(([key, val]) => {
+      if (val !== undefined) {
+        cleanData[key] = val;
+      }
+    });
+
+    await updateDoc(ref, cleanData);
+
+    // 5. Resequence vouchers if date changed or to update filenames
+    const newDate = updatedData.date || oldDate;
+    if (oldDate && oldDate.substring(0, 7) !== (newDate && newDate.substring(0, 7))) {
+      await resequenceVouchersForMonth(oldDate.substring(0, 7));
+    }
+    if (newDate) {
+      await resequenceVouchersForMonth(newDate.substring(0, 7));
+    }
+
+    // 6. Log activity
+    await logActivity(
+      updaterUserId,
+      updaterName,
+      `${updaterRole === "admin" ? "Admin" : "Employee"} Updated Expense`,
+      `Updated expense ID: ${expenseId} (${oldExpense.voucherNumber || "N/A"})`
+    );
+
+    // 7. Notifications
+    if (updaterRole === "admin" && oldExpense.employeeId !== updaterUserId) {
+      await createNotification(
+        oldExpense.employeeId,
+        "Expense Claim Updated by Admin",
+        `Admin ${updaterName} updated details for your expense claim (${oldExpense.voucherNumber || oldExpense.title}).`,
+        expenseId,
+        oldExpense.voucherNumber
+      );
+    } else if (updaterRole === "employee") {
+      const adminsQuery = query(collection(db, "users"), where("role", "==", "admin"));
+      const adminsSnap = await getDocs(adminsQuery);
+      for (const adminDoc of adminsSnap.docs) {
+        await createNotification(
+          adminDoc.id,
+          "Expense Claim Updated by Employee",
+          `${updaterName} updated expense claim (${oldExpense.voucherNumber || oldExpense.title}).`,
+          expenseId,
+          oldExpense.voucherNumber
+        );
+      }
+    }
+  } catch (error) {
+    console.error("Error updating expense with bills:", error);
+    throw error;
+  }
+}
+
+
 export async function deleteExpense(id: string, employeeId: string, employeeName: string): Promise<void> {
   try {
     const ref = doc(db, "expenses", id);
@@ -1102,6 +1211,102 @@ export async function deleteEmployeeProfile(
     return true;
   } catch (error) {
     console.error("Error deleting employee profile:", error);
+    throw error;
+  }
+}
+
+export async function toggleEmployeeAccountStatus(
+  targetEmployeeId: string,
+  adminUserId: string,
+  adminName: string
+): Promise<"active" | "deactivated"> {
+  try {
+    const userRef = doc(db, "users", targetEmployeeId);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) throw new Error("Employee not found.");
+
+    const userData = userSnap.data() as EmployeeProfile;
+    const newStatus: "active" | "deactivated" = userData.status === "deactivated" ? "active" : "deactivated";
+
+    await updateDoc(userRef, { status: newStatus });
+    await logActivity(
+      adminUserId,
+      adminName,
+      newStatus === "deactivated" ? "Deactivate Employee" : "Reactivate Employee",
+      `Changed status of employee ${userData.name} (${targetEmployeeId}) to ${newStatus}`
+    );
+    return newStatus;
+  } catch (error) {
+    console.error("Error toggling employee account status:", error);
+    throw error;
+  }
+}
+
+export async function markEmployeeExpensesAsReimbursed(
+  employeeId: string,
+  adminUserId: string,
+  adminName: string
+): Promise<number> {
+  try {
+    const q = query(
+      collection(db, "expenses"),
+      where("employeeId", "==", employeeId)
+    );
+    const snap = await getDocs(q);
+    const eligibleDocs = snap.docs.filter(d => {
+      const data = d.data() as Expense;
+      return data.status === "approved" || data.status === "pending" || data.status === "under_review";
+    });
+
+    if (eligibleDocs.length === 0) return 0;
+
+    const updatePromises = eligibleDocs.map(d =>
+      updateDoc(doc(db, "expenses", d.id), { status: "reimbursed" })
+    );
+    await Promise.all(updatePromises);
+
+    await logActivity(
+      adminUserId,
+      adminName,
+      "Mark Reimbursed",
+      `Reimbursed ${eligibleDocs.length} claim(s) for employee ID ${employeeId}`
+    );
+
+    return eligibleDocs.length;
+  } catch (error) {
+    console.error("Error marking expenses as reimbursed:", error);
+    throw error;
+  }
+}
+
+export async function markAllEmployeesExpensesAsReimbursed(
+  adminUserId: string,
+  adminName: string
+): Promise<number> {
+  try {
+    const snap = await getDocs(collection(db, "expenses"));
+    const eligibleDocs = snap.docs.filter(d => {
+      const data = d.data() as Expense;
+      return data.status === "approved" || data.status === "pending" || data.status === "under_review";
+    });
+
+    if (eligibleDocs.length === 0) return 0;
+
+    const updatePromises = eligibleDocs.map(d =>
+      updateDoc(doc(db, "expenses", d.id), { status: "reimbursed" })
+    );
+    await Promise.all(updatePromises);
+
+    await logActivity(
+      adminUserId,
+      adminName,
+      "Mark All Reimbursed",
+      `Reimbursed ${eligibleDocs.length} claim(s) across all employees`
+    );
+
+    return eligibleDocs.length;
+  } catch (error) {
+    console.error("Error marking all expenses as reimbursed:", error);
     throw error;
   }
 }

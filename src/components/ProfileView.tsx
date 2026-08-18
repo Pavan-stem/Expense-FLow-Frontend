@@ -93,7 +93,7 @@ export default function ProfileView({ user, onProfileUpdate }: ProfileViewProps)
               </span>
               <div>
                 <h3 className="text-sm font-bold text-slate-800">Operational Profile</h3>
-                <p className="text-[10px] text-slate-400">Employee ID: {user.employeeId}</p>
+                <p className="text-[10px] text-slate-400">Account Details & Settings</p>
               </div>
             </div>
 

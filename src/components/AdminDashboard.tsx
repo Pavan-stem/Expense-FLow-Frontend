@@ -4,10 +4,12 @@ import {
   subscribeToExpenses,
   getEmployees, 
   addCategory, 
-
   getCategories, 
   toggleEmployeeAdminRole,
   deleteEmployeeProfile,
+  toggleEmployeeAccountStatus,
+  markEmployeeExpensesAsReimbursed,
+  markAllEmployeesExpensesAsReimbursed,
   getBillData,
   updateExpense,
   deleteExpense,
@@ -25,6 +27,7 @@ import {
   exportBillsToWordDocx, 
   exportBillsToPDF 
 } from "../lib/billDocumentGenerator";
+import EditExpenseModal from "./EditExpenseModal";
 import { 
   ShieldAlert, 
   Users, 
@@ -38,6 +41,7 @@ import {
   FileMinus,
   Download,
   Eye,
+  Edit3,
   FileText,
   Filter,
   Check,
@@ -51,6 +55,7 @@ import {
   MessageSquare,
   Send,
   CheckCircle,
+  CheckCircle2,
   AlertCircle
 } from "lucide-react";
 
@@ -112,6 +117,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
   // Voucher deletion state & Admin actions
   const [deletingVoucherExpense, setDeletingVoucherExpense] = useState<Expense | null>(null);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [adminActionLoading, setAdminActionLoading] = useState(false);
   const [activeActionStatus, setActiveActionStatus] = useState<string | null>(null);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -377,9 +383,9 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
     if (!dateStr) return "";
     const parts = dateStr.split("-");
     if (parts.length === 3 && parts[0].length === 4) {
-      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      return `\t${parts[2]}/${parts[1]}/${parts[0]}`;
     }
-    return dateStr;
+    return `\t${dateStr}`;
   };
 
   const fetchData = async () => {
@@ -389,8 +395,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
       setExpenses(expData);
 
       const empData = await getEmployees();
-      setEmployees(empData.filter(e => e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
-
+      setEmployees(empData.filter(e => e.role !== "admin" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
 
       const catData = await getCategories();
       setCategories(catData);
@@ -409,7 +414,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
     });
 
     getEmployees().then(empData => {
-      setEmployees(empData.filter(e => e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
+      setEmployees(empData.filter(e => e.role !== "admin" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
     });
 
     getCategories().then(catData => {
@@ -475,7 +480,149 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
     .filter(exp => isDateInMonth(exp.date, selectedMonth, selectedYear))
     .reduce((sum, e) => sum + e.totalAmount, 0);
 
-  // Employee Monthly Breakdown Data Helper
+  const handleToggleAccountStatus = async (targetEmpId: string, currentStatus?: "active" | "deactivated", name?: string) => {
+    try {
+      const newStatus = await toggleEmployeeAccountStatus(targetEmpId, user.employeeId, user.name);
+      setEmployees(prev => prev.map(e => e.employeeId === targetEmpId ? { ...e, status: newStatus } : e));
+      showToast("success", `Account status for ${name || targetEmpId} updated to ${newStatus.toUpperCase()}.`);
+    } catch (err: any) {
+      showToast("error", err.message || "Failed to update employee account status.");
+    }
+  };
+
+  const handleMarkReimbursed = async (employeeId: string, employeeName: string) => {
+    try {
+      const count = await markEmployeeExpensesAsReimbursed(employeeId, user.employeeId, user.name);
+      if (count > 0) {
+        showToast("success", `Successfully marked ${count} approved claim(s) as REIMBURSED for ${employeeName}!`);
+        setExpenses(prev => prev.map(e => e.employeeId === employeeId && e.status === "approved" ? { ...e, status: "reimbursed" } : e));
+      } else {
+        showToast("error", `No pending approved claims found to reimburse for ${employeeName}.`);
+      }
+    } catch (err: any) {
+      showToast("error", err.message || "Failed to mark claims as reimbursed.");
+    }
+  };
+
+  const handleMarkAllReimbursed = async () => {
+    try {
+      const count = await markAllEmployeesExpensesAsReimbursed(user.employeeId, user.name);
+      if (count > 0) {
+        showToast("success", `Successfully marked ${count} claim(s) as REIMBURSED across all employees!`);
+        setExpenses(prev => prev.map(e => (e.status === "approved" || e.status === "pending" || e.status === "under_review") ? { ...e, status: "reimbursed" } : e));
+      } else {
+        showToast("error", `No pending or approved claims found to reimburse.`);
+      }
+    } catch (err: any) {
+      showToast("error", err.message || "Failed to mark all claims as reimbursed.");
+    }
+  };
+
+  const handleExportPivotCSV = () => {
+    const list = getEmployeeMonthlyTotals();
+    if (list.length === 0) {
+      showToast("error", "No pivot data available to export.");
+      return;
+    }
+
+    const grandTotal = list.reduce((sum, e) => sum + e.totalAmount, 0);
+
+    const headers = ["Paid by", "SUM of Amount"];
+    const rows = list.map(e => [`"${e.name.replace(/"/g, '""')}"`, e.totalAmount.toFixed(2)]);
+    rows.push(["Grand Total", grandTotal.toFixed(2)]);
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Pivot_Summary_${selectedMonth}_${selectedYear}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("success", "Pivot Summary CSV exported successfully!");
+  };
+
+  const handleExportPivotExcel = () => {
+    const list = getEmployeeMonthlyTotals();
+    if (list.length === 0) {
+      showToast("error", "No pivot data available to export.");
+      return;
+    }
+
+    const monthTitle = isAllTime ? "All Time" : `${selectedMonthName} ${selectedYear}`;
+    const grandTotal = list.reduce((sum, e) => sum + e.totalAmount, 0);
+
+    const rowsHtml = list.map((e, idx) => `
+      <tr style="background-color: ${idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC'}; font-family: Arial, sans-serif; font-size: 12px;">
+        <td style="padding: 6px 10px; border: 1px solid #CBD5E1; font-weight: bold; color: #0F172A; width: 160px;">${e.name}</td>
+        <td style="padding: 6px 10px; border: 1px solid #CBD5E1; text-align: right; font-weight: bold; font-family: monospace; color: #0F172A; width: 110px;">${e.totalAmount.toFixed(0)}</td>
+      </tr>
+    `).join("");
+
+    const excelHtml = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="utf-8" />
+        <!--[if gte mso 9]>
+        <xml>
+         <x:ExcelWorkbook>
+          <x:ExcelWorksheets>
+           <x:ExcelWorksheet>
+            <x:Name>Monthly Expenses</x:Name>
+            <x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>
+           </x:ExcelWorksheet>
+          </x:ExcelWorksheets>
+         </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <style>
+          body { font-family: Arial, sans-serif; padding: 12px; background-color: #FFFFFF; }
+          .heading { font-size: 14px; font-weight: bold; color: #1E1B4B; margin-bottom: 10px; white-space: nowrap; }
+          table { border-collapse: collapse; width: 270px; border: 1.5px solid #3730A3; }
+          th { background-color: #3730A3; color: #FFFFFF; font-weight: bold; font-size: 12px; text-align: left; padding: 8px 10px; border: 1px solid #3730A3; }
+          td { padding: 6px 10px; border: 1px solid #CBD5E1; font-size: 12px; }
+          .grand-total { background-color: #1E1B4B; color: #FFFFFF; font-weight: bold; font-size: 13px; }
+          .grand-total-amt { color: #10B981; font-weight: bold; font-size: 13px; text-align: right; font-family: monospace; }
+        </style>
+      </head>
+      <body>
+        <h2 class="heading">Employee Monthly Expenses (${monthTitle})</h2>
+        <table border="1" style="width:270px; border-collapse:collapse;">
+          <colgroup>
+            <col style="width: 160px;" />
+            <col style="width: 110px;" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th style="background-color:#3730A3;color:#FFFFFF;font-weight:bold;padding:8px 10px;text-align:left;width:160px;">Paid by</th>
+              <th style="background-color:#3730A3;color:#FFFFFF;font-weight:bold;padding:8px 10px;text-align:right;width:110px;">SUM of Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+          <tfoot>
+            <tr class="grand-total">
+              <td style="padding: 8px 10px; border: 1px solid #1E1B4B; font-weight: bold; background-color:#1E1B4B; color:#FFFFFF; width:160px;">Grand Total</td>
+              <td style="padding: 8px 10px; border: 1px solid #1E1B4B; text-align: right; font-weight: bold; color: #10B981; font-family: monospace; background-color:#1E1B4B; width:110px;">${grandTotal.toFixed(0)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob([excelHtml], { type: "application/vnd.ms-excel;charset=utf-8" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `Employee_Monthly_Expenses_${selectedMonthName}_${selectedYear}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast("success", "Compact Excel Pivot Table downloaded successfully!");
+  };
+
+  // Employee Monthly Breakdown Data Helper (Pivot Table Summary)
   const getEmployeeMonthlyTotals = () => {
     const empMap: {
       [key: string]: {
@@ -484,8 +631,10 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         email: string;
         role: string;
         employeeId: string;
+        status: "active" | "deactivated";
         totalAmount: number;
         approvedAmount: number;
+        reimbursedAmount: number;
         pendingAmount: number;
         rejectedAmount: number;
         claimsCount: number;
@@ -494,6 +643,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
     // 1. Seed with registered employees from DB
     employees.forEach(emp => {
+      if (emp.role === "admin") return;
       const key = (emp.email || emp.employeeId || emp.name).toLowerCase().trim();
       empMap[key] = {
         id: emp.id || emp.employeeId,
@@ -501,8 +651,10 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         email: emp.email || "N/A",
         role: emp.role || "employee",
         employeeId: emp.employeeId || emp.id || "",
+        status: emp.status === "deactivated" ? "deactivated" : "active",
         totalAmount: 0,
         approvedAmount: 0,
+        reimbursedAmount: 0,
         pendingAmount: 0,
         rejectedAmount: 0,
         claimsCount: 0
@@ -517,6 +669,8 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         (emp.name && exp.employeeName && emp.name.toLowerCase().trim() === exp.employeeName.toLowerCase().trim())
       );
 
+      if (matchedProfile?.role === "admin") return;
+
       const rawName = matchedProfile?.name || exp.employeeName || exp.employeeId || "Employee";
       const key = (matchedProfile?.email || exp.employeeEmail || rawName).toLowerCase().trim();
 
@@ -527,8 +681,10 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
           email: matchedProfile?.email || exp.employeeEmail || "N/A",
           role: matchedProfile?.role || "employee",
           employeeId: exp.employeeId || matchedProfile?.employeeId || "",
+          status: matchedProfile?.status === "deactivated" ? "deactivated" : "active",
           totalAmount: 0,
           approvedAmount: 0,
+          reimbursedAmount: 0,
           pendingAmount: 0,
           rejectedAmount: 0,
           claimsCount: 0
@@ -536,11 +692,16 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
       }
 
       const amt = exp.totalAmount || exp.amount || 0;
-      empMap[key].totalAmount += amt;
       empMap[key].claimsCount += 1;
 
-      if (exp.status === "approved" || exp.status === "reimbursed") {
+      // Only ACCEPTED / APPROVED / REIMBURSED claims add to totalAmount (SUM of Amount)
+      if (exp.status === "reimbursed") {
+        empMap[key].reimbursedAmount += amt;
         empMap[key].approvedAmount += amt;
+        empMap[key].totalAmount += amt;
+      } else if (exp.status === "approved") {
+        empMap[key].approvedAmount += amt;
+        empMap[key].totalAmount += amt;
       } else if (exp.status === "pending" || exp.status === "under_review") {
         empMap[key].pendingAmount += amt;
       } else if (exp.status === "rejected") {
@@ -548,7 +709,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
       }
     });
 
-    let list = Object.values(empMap);
+    let list = Object.values(empMap).filter(e => e.role !== "admin");
 
     // Apply search filter
     if (empSearchQuery.trim()) {
@@ -770,25 +931,26 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         </div>
       </div>
 
-      {/* Employee Monthly Expense Summary Section (Replacing Charts & Bargraphs) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Employee Monthly Expense Summary Section (Full-Width Expense Flow) */}
+      <div className="w-full">
         {/* Main Panel: Employee Monthly Expense Breakdown */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm space-y-4 lg:col-span-2">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className="bg-white rounded-2xl border border-slate-100 p-5 sm:p-6 shadow-sm space-y-4 w-full">
+          <div className="border-b border-slate-100 pb-4 space-y-3">
+            {/* Top Row: Single-line Title */}
             <div>
               <div className="flex items-center gap-2">
-                <Users className="h-4 w-4 text-indigo-600" />
-                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                  Employee Monthly Expenses ({isAllTime ? "All-Time Corporate Summary" : `${selectedMonthName} ${selectedYear}`})
+                <Users className="h-5 w-5 text-indigo-600 shrink-0" />
+                <h3 id="employee-monthly-expenses-single-line-heading" className="text-base font-extrabold text-indigo-950 font-sans tracking-tight whitespace-nowrap">
+                  Employee Monthly Expenses ({isAllTime ? "All Time" : `${selectedMonthName} ${selectedYear}`})
                 </h3>
               </div>
-              <p className="text-[10px] text-slate-400 mt-0.5">
-                Total monthly expense amount claimed by each and every employee for {isAllTime ? "all time" : `${selectedMonthName} ${selectedYear}`}.
+              <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+                Total accepted/approved monthly expense amount claimed by each employee for {isAllTime ? "all time" : `${selectedMonthName} ${selectedYear}`}.
               </p>
             </div>
 
-            {/* Controls: Search & Sort */}
-            <div className="flex items-center gap-2">
+            {/* Bottom Row (Strictly Below Heading): Controls Toolbar */}
+            <div className="flex flex-wrap items-center gap-2.5 pt-1">
               <div className="relative">
                 <Search className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                 <input
@@ -796,141 +958,188 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                   placeholder="Search staff..."
                   value={empSearchQuery}
                   onChange={(e) => setEmpSearchQuery(e.target.value)}
-                  className="pl-8 pr-3 py-1 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 w-36 sm:w-44"
+                  className="pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 w-36 sm:w-44"
                 />
               </div>
 
               <select
                 value={empSortBy}
                 onChange={(e) => setEmpSortBy(e.target.value as any)}
-                className="py-1 px-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-semibold cursor-pointer focus:outline-none"
+                className="py-1.5 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 font-semibold cursor-pointer focus:outline-none"
               >
-                <option value="total">Sort: Highest Total</option>
+                <option value="total">Sort: Highest Accepted Amount</option>
                 <option value="approved">Sort: Approved Amount</option>
                 <option value="claims">Sort: Claims Count</option>
                 <option value="name">Sort: Name A-Z</option>
               </select>
+
+              <button
+                type="button"
+                onClick={handleExportPivotExcel}
+                className="py-1.5 px-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title="Export styled compact Excel Table (.xls) with colors, bold headers, and single line title"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export Excel Table
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportPivotCSV}
+                className="py-1.5 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title="Export Pivot CSV"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export CSV
+              </button>
             </div>
           </div>
 
-          {/* List of Employees with Monthly Totals */}
+          {/* Employee Expense Summary Pivot Table */}
           {getEmployeeMonthlyTotals().length === 0 ? (
             <div className="p-8 text-center text-slate-400 text-xs italic">
               No employee records found matching filter criteria.
             </div>
           ) : (
-            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
-              {getEmployeeMonthlyTotals().map((empItem) => {
-                return (
-                  <div 
-                    key={empItem.id} 
-                    className="p-3.5 bg-slate-50/70 hover:bg-indigo-50/30 border border-slate-200/60 rounded-xl transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                  >
-                    {/* Employee Profile Info */}
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-9 h-9 rounded-full bg-indigo-600 text-white font-extrabold text-xs flex items-center justify-center shadow-xs shrink-0">
-                        {empItem.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-bold text-xs text-slate-800 truncate">{empItem.name}</span>
-                          <span className={`px-1.5 py-0.2 text-[8px] font-extrabold uppercase rounded border ${
-                            empItem.role === "admin" 
-                              ? "bg-purple-100 text-purple-700 border-purple-200" 
-                              : "bg-slate-100 text-slate-600 border-slate-200"
-                          }`}>
-                            {empItem.role}
-                          </span>
-                          {empItem.employeeId && (
-                            <span className="text-[9px] font-mono text-slate-400">ID: {empItem.employeeId}</span>
-                          )}
-                        </div>
-                        <span className="text-[10px] text-slate-400 truncate block">{empItem.email}</span>
-                      </div>
-                    </div>
+            <div className="overflow-x-auto border border-slate-200/80 rounded-xl max-h-[480px] overflow-y-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-100/80 border-b border-slate-200 text-slate-600 text-[10px] uppercase tracking-wider font-bold sticky top-0 z-10 backdrop-blur-md">
+                    <th className="py-3 px-4 font-sans">Paid by</th>
+                    <th className="py-3 px-3 text-center font-sans">Account Status</th>
+                    <th className="py-3 px-3 text-right font-sans">SUM of Amount</th>
+                    <th className="py-3 px-3 text-right font-sans">Approved</th>
+                    <th className="py-3 px-3 text-right font-sans">Pending</th>
+                    <th className="py-3 px-3 text-right font-sans">Reimbursed</th>
+                    <th className="py-3 px-4 text-center font-sans">Reimbursement Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {getEmployeeMonthlyTotals().map((empItem) => {
+                    const isDeactivated = empItem.status === "deactivated";
+                    const hasApprovedUnpaid = empItem.approvedAmount > empItem.reimbursedAmount || empItem.pendingAmount > 0;
+                    return (
+                      <tr key={empItem.id} className="hover:bg-indigo-50/20 transition">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-full text-white font-extrabold text-xs flex items-center justify-center shadow-2xs shrink-0 ${
+                              isDeactivated ? "bg-slate-400" : "bg-indigo-600"
+                            }`}>
+                              {empItem.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <span className="font-bold text-slate-800 truncate block">{empItem.name}</span>
+                              <span className="text-[10px] text-slate-400 block truncate">{empItem.email}</span>
+                            </div>
+                          </div>
+                        </td>
 
-                    {/* Breakdown Badges & Total Amount */}
-                    <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
-                      {/* Sub-breakdown: Approved, Pending, Rejected */}
-                      <div className="flex items-center gap-1.5 text-[9px] font-bold">
-                        <span className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-lg border border-emerald-100" title="Approved amount for selected month">
-                          ✓ ₹{empItem.approvedAmount.toFixed(0)}
-                        </span>
-                        {empItem.pendingAmount > 0 && (
-                          <span className="px-2 py-1 bg-amber-50 text-amber-700 rounded-lg border border-amber-100" title="Pending amount for selected month">
-                            ⏳ ₹{empItem.pendingAmount.toFixed(0)}
-                          </span>
-                        )}
-                        {empItem.rejectedAmount > 0 && (
-                          <span className="px-2 py-1 bg-rose-50 text-rose-700 rounded-lg border border-rose-100" title="Rejected amount for selected month">
-                            ✕ ₹{empItem.rejectedAmount.toFixed(0)}
-                          </span>
-                        )}
-                        <span className="px-2 py-1 bg-slate-200/60 text-slate-700 rounded-lg font-mono" title="Total claim items count">
-                          {empItem.claimsCount} claims
-                        </span>
-                      </div>
+                        <td className="py-3 px-3 text-center whitespace-nowrap">
+                          <div className="flex flex-col items-center gap-1">
+                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase border ${
+                              isDeactivated
+                                ? "bg-rose-50 text-rose-700 border-rose-200"
+                                : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            }`}>
+                              {isDeactivated ? "🔴 Deactivated" : "🟢 Active"}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleAccountStatus(empItem.employeeId, empItem.status, empItem.name)}
+                              className="text-[9px] font-semibold text-slate-500 hover:text-indigo-600 underline cursor-pointer"
+                            >
+                              {isDeactivated ? "Reactivate" : "Deactivate"}
+                            </button>
+                          </div>
+                        </td>
 
-                      {/* Total Monthly Amount */}
-                      <div className="text-right min-w-[100px]">
-                        <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wider">
-                          {isAllTime ? "Total Spent" : "Monthly Total"}
-                        </span>
-                        <span className="text-sm font-black text-indigo-900 font-mono">
+                        <td className="py-3 px-3 text-right font-black text-slate-900 font-mono whitespace-nowrap">
                           ₹{empItem.totalAmount.toFixed(2)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                        </td>
+
+                        <td className="py-3 px-3 text-right font-bold text-emerald-600 font-mono whitespace-nowrap">
+                          ₹{empItem.approvedAmount.toFixed(2)}
+                        </td>
+
+                        <td className="py-3 px-3 text-right font-bold text-amber-600 font-mono whitespace-nowrap">
+                          ₹{empItem.pendingAmount.toFixed(2)}
+                        </td>
+
+                        <td className="py-3 px-3 text-right font-bold text-purple-600 font-mono whitespace-nowrap">
+                          ₹{empItem.reimbursedAmount.toFixed(2)}
+                        </td>
+
+                        <td className="py-3 px-4 text-center whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => handleMarkReimbursed(empItem.employeeId, empItem.name)}
+                            disabled={!hasApprovedUnpaid}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1 mx-auto cursor-pointer ${
+                              hasApprovedUnpaid
+                                ? "bg-purple-600 hover:bg-purple-700 text-white shadow-purple-600/20"
+                                : "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+                            }`}
+                            title={hasApprovedUnpaid ? `Reimburse full total for ${empItem.name}` : "No pending claims to reimburse"}
+                          >
+                            <Coins className="h-3.5 w-3.5" />
+                            {hasApprovedUnpaid ? `Reimburse ₹${empItem.totalAmount.toFixed(0)}` : "Fully Reimbursed"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  {(() => {
+                    const totals = getEmployeeMonthlyTotals();
+                    const grandTotalSpent = totals.reduce((sum, e) => sum + e.totalAmount, 0);
+                    const grandApproved = totals.reduce((sum, e) => sum + e.approvedAmount, 0);
+                    const grandPending = totals.reduce((sum, e) => sum + e.pendingAmount, 0);
+                    const grandReimbursed = totals.reduce((sum, e) => sum + e.reimbursedAmount, 0);
+                    const hasUnreimbursed = grandTotalSpent > grandReimbursed || grandPending > 0;
+                    return (
+                      <tr className="bg-slate-900 text-white font-bold text-xs sticky bottom-0 z-10 border-t-2 border-slate-700">
+                        <td className="py-3 px-4 uppercase font-black tracking-wider text-indigo-300">
+                          Grand Total
+                        </td>
+                        <td className="py-3 px-3 text-center text-[10px] text-slate-400 font-mono">
+                          {totals.length} Employees
+                        </td>
+                        <td className="py-3 px-3 text-right font-black font-mono text-white text-sm">
+                          ₹{grandTotalSpent.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-emerald-400">
+                          ₹{grandApproved.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-amber-400">
+                          ₹{grandPending.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-purple-300">
+                          ₹{grandReimbursed.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <button
+                            type="button"
+                            onClick={handleMarkAllReimbursed}
+                            disabled={!hasUnreimbursed}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition shadow-md flex items-center justify-center gap-1 mx-auto cursor-pointer ${
+                              hasUnreimbursed
+                                ? "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30"
+                                : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed"
+                            }`}
+                            title="Reimburse all employees after checking pivot table"
+                          >
+                            <CheckCircle className="h-3.5 w-3.5" />
+                            {hasUnreimbursed ? `Reimburse All (₹${grandTotalSpent.toFixed(0)})` : "All Reimbursed"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })()}
+                </tfoot>
+              </table>
             </div>
           )}
-        </div>
-
-        {/* Side Panel: Manage categories */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm flex flex-col justify-between space-y-4">
-          <div>
-            <div className="flex items-center gap-2 border-b border-slate-50 pb-2.5 mb-3">
-              <FolderPlus className="h-4 w-4 text-indigo-600" />
-              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Manage categories</h3>
-            </div>
-
-            <form onSubmit={handleAddCategory} className="space-y-3">
-              <div>
-                <input
-                  id="admin-new-cat-input"
-                  type="text"
-                  value={newCatName}
-                  onChange={(e) => setNewCatName(e.target.value)}
-                  placeholder="e.g. Health Benefits"
-                  className="block w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 bg-slate-50 focus:bg-white text-xs outline-none"
-                />
-              </div>
-              <button
-                id="admin-add-cat-btn"
-                type="submit"
-                className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-1 cursor-pointer"
-              >
-                <Plus className="h-3.5 w-3.5" /> Add Category
-              </button>
-            </form>
-
-            {catMessage && (
-              <p id="admin-cat-alert" className="text-[10px] text-emerald-600 font-semibold mt-2">{catMessage}</p>
-            )}
-          </div>
-
-          <div className="flex-1 mt-4 overflow-y-auto max-h-64 border-t border-slate-50 pt-3">
-            <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Category list</span>
-            <div className="flex flex-wrap gap-1.5">
-              {categories.map(cat => (
-                <span key={cat.id} className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg text-[10px] font-semibold border border-slate-200/60">
-                  {cat.name}
-                </span>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -967,7 +1176,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                   <tr className="bg-slate-900/60 border-b border-slate-800 text-slate-400 text-[10px] uppercase tracking-wider font-bold">
                     <th className="py-3 px-4 font-sans">Employee Details</th>
                     <th className="py-3 px-4 font-sans">Email Address</th>
-                    <th className="py-3 px-4 text-center font-sans">Current Role</th>
+                    <th className="py-3 px-4 text-center font-sans">Account Status</th>
                     <th className="py-3 px-6 text-center font-sans">Administrative Toggle</th>
                     <th className="py-3 px-4 text-center font-sans">Actions</th>
                   </tr>
@@ -976,24 +1185,27 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                   {employees.map(emp => {
                     const isSelf = emp.email.toLowerCase().trim() === user.email.toLowerCase().trim() || emp.employeeId === user.employeeId;
                     const isAdmin = emp.role === "admin";
+                    const isDeactivated = emp.status === "deactivated";
                     const canDelete = !isSelf;
                     return (
                       <tr key={emp.employeeId} className="hover:bg-slate-900/20 transition">
                         <td className="py-3 px-4">
                           <div className="font-bold text-white">{emp.name}</div>
-                          <div className="text-[10px] text-slate-500 font-mono">{emp.employeeId}</div>
                         </td>
                         <td className="py-3 px-4 font-mono text-[11px] text-slate-400">{emp.email}</td>
                         <td className="py-3 px-4 text-center">
-                          {isAdmin ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-950 text-indigo-400 rounded text-[10px] font-bold border border-indigo-800">
-                              <Shield className="h-2.5 w-2.5" /> ADMIN
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-800 text-slate-400 rounded text-[10px] font-bold border border-slate-700">
-                              EMPLOYEE
-                            </span>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleAccountStatus(emp.employeeId, emp.status, emp.name)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                              isDeactivated
+                                ? "bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-800"
+                                : "bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800"
+                            }`}
+                            title={isDeactivated ? "Click to Reactivate Account" : "Click to Deactivate Account"}
+                          >
+                            {isDeactivated ? "🔴 Deactivated (Click to Activate)" : "🟢 Active (Click to Deactivate)"}
+                          </button>
                         </td>
                         <td className="py-3 px-6 text-center">
                           {isSelf ? (
@@ -1065,8 +1277,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
             <div className="text-xs text-slate-300 space-y-2">
               <p>
                 Are you sure you want to delete the employee profile for{" "}
-                <span className="font-bold text-white">{deletingEmployee.name}</span> (ID:{" "}
-                <span className="font-mono text-indigo-400">{deletingEmployee.employeeId}</span>)?
+                <span className="font-bold text-white">{deletingEmployee.name}</span>?
               </p>
               <p className="text-slate-400">
                 They will no longer be able to log in or submit expense claims, and will be removed from all dropdown filters.
@@ -1148,10 +1359,6 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                 <div>
                   <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Employee Name</span>
                   <p className="text-slate-800 font-semibold">{viewingVoucherDetails.employeeName}</p>
-                </div>
-                <div>
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Employee ID</span>
-                  <p className="text-slate-800 font-mono">{viewingVoucherDetails.employeeId}</p>
                 </div>
                 <div>
                   <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Claim Title</span>
@@ -1361,18 +1568,36 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
               </div>
             </div>
 
-            {/* Modal Footer with Status Actions & Delete */}
+            {/* Modal Footer with Status Actions, Edit & Delete */}
             <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-              <button
-                id="admin-modal-delete-voucher-btn"
-                type="button"
-                onClick={() => setDeletingVoucherExpense(viewingVoucherDetails)}
-                disabled={adminActionLoading}
-                className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Delete Voucher
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  id="admin-modal-edit-voucher-btn"
+                  type="button"
+                  onClick={() => {
+                    const targetExp = viewingVoucherDetails;
+                    setViewingVoucherDetails(null);
+                    setEditingExpense(targetExp);
+                  }}
+                  disabled={adminActionLoading}
+                  className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+                  title="Edit Expense Data & Bills"
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                  Edit Expense Claim
+                </button>
+                <button
+                  id="admin-modal-delete-voucher-btn"
+                  type="button"
+                  onClick={() => setDeletingVoucherExpense(viewingVoucherDetails)}
+                  disabled={adminActionLoading}
+                  className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete Voucher
+                </button>
+              </div>
+
 
               <div className="flex flex-wrap items-center gap-2">
                 <button
@@ -1583,6 +1808,19 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
           </div>
         </div>
       )}
+
+      {/* Edit Expense Modal */}
+      <EditExpenseModal
+        expense={editingExpense}
+        currentUser={user}
+        isOpen={!!editingExpense}
+        onClose={() => setEditingExpense(null)}
+        onSuccess={() => {
+          setEditingExpense(null);
+          fetchData();
+        }}
+      />
     </div>
   );
 }
+

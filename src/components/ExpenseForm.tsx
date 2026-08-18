@@ -6,7 +6,7 @@ import {
   type BillFile,
   type Expense
 } from "../lib/firebase";
-import { Upload, FileText, Image, Trash2, X, AlertTriangle, Sparkles, Receipt, Coins, Eye, ZoomIn, ZoomOut, RotateCcw, Calculator, Loader2, Plus, ChevronLeft, ChevronRight } from "lucide-react";
+import { Upload, FileText, Image, Trash2, X, AlertTriangle, Sparkles, Receipt, Coins, Eye, ZoomIn, ZoomOut, RotateCcw, Calculator, Loader2, Plus, ChevronLeft, ChevronRight, UserCheck, Building2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 interface ExpenseFormProps {
@@ -19,7 +19,8 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [amount, setAmount] = useState("");
   const [vendor, setVendor] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<"Cash" | "UPI" | "UPI+Cash" | "Credit Card" | "Debit Card" | "Bank Transfer">("UPI");
+  const [paymentType, setPaymentType] = useState<"Personal Payment" | "SW Payment">("Personal Payment");
+  const [paymentSubMode, setPaymentSubMode] = useState<string>("");
   const [expenseCategory, setExpenseCategory] = useState("");
   const [customCategory, setCustomCategory] = useState("");
   const [schoolLocationDetails, setSchoolLocationDetails] = useState("");
@@ -291,6 +292,11 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (user.status === "deactivated") {
+      setMessage({ type: "error", text: "Your account has been deactivated. You cannot submit new expense claims." });
+      return;
+    }
+
     if (!expenseCategory) {
       setMessage({ type: "error", text: "Please select a Type of Expense." });
       return;
@@ -323,6 +329,8 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
     setSubmitting(true);
     setMessage(null);
 
+    const finalPaymentMethod = (paymentSubMode ? `${paymentType} (${paymentSubMode})` : paymentType) as any;
+
     try {
       await submitExpense({
         employeeId: user.employeeId,
@@ -333,7 +341,7 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
         date,
         amount: parsedAmount,
         vendor,
-        paymentMethod,
+        paymentMethod: finalPaymentMethod,
         description: finalDescription,
         totalAmount,
         bills: uploadedBills
@@ -342,6 +350,8 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
       // Clear Form on success
       setAmount("");
       setVendor("");
+      setPaymentType("Personal Payment");
+      setPaymentSubMode("");
       setExpenseCategory("");
       setCustomCategory("");
       setSchoolLocationDetails("");
@@ -371,6 +381,16 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
             <p className="text-xs text-slate-500 mt-0.5">Submit office expenses, track reimbursements, and upload digital receipts.</p>
           </div>
         </div>
+
+        {user.status === "deactivated" && (
+          <div id="deactivated-account-alert" className="p-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl mb-6 text-xs flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-rose-600 flex-shrink-0" />
+            <div>
+              <span className="font-bold block text-sm">Account Deactivated</span>
+              <span>Your account has been deactivated by the administrator. You cannot submit new expense claims.</span>
+            </div>
+          </div>
+        )}
 
         {message && (
           <div id="form-alert" className={`p-4 rounded-xl border mb-6 text-sm flex gap-2.5 ${message.type === "success"
@@ -537,14 +557,52 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
             </div>
 
             <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 block mb-1.5">Payment Method*</label>
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 block mb-1.5">Method of Payment*</label>
+              
+              {/* Quick Choice Pills for Personal Payment vs SW Payment */}
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <button
+                  type="button"
+                  id="payment-pill-personal"
+                  onClick={() => setPaymentType("Personal Payment")}
+                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                    paymentType === "Personal Payment"
+                      ? "border-indigo-600 bg-indigo-50/80 text-indigo-700 shadow-2xs"
+                      : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  <UserCheck className={`h-4 w-4 flex-shrink-0 ${paymentType === "Personal Payment" ? "text-indigo-600" : "text-slate-400"}`} />
+                  <div className="text-left">
+                    <span className="block font-bold">Personal Payment</span>
+                    <span className="block text-[10px] text-slate-500 font-normal">Paid by Employee</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  id="payment-pill-sw"
+                  onClick={() => setPaymentType("SW Payment")}
+                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                    paymentType === "SW Payment"
+                      ? "border-purple-600 bg-purple-50/80 text-purple-700 shadow-2xs"
+                      : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  <Building2 className={`h-4 w-4 flex-shrink-0 ${paymentType === "SW Payment" ? "text-purple-600" : "text-slate-400"}`} />
+                  <div className="text-left">
+                    <span className="block font-bold">SW Payment</span>
+                    <span className="block text-[10px] text-slate-500 font-normal">Paid by SW / Company</span>
+                  </div>
+                </button>
+              </div>
+
               <select
                 id="form-payment"
-                required
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value as any)}
-                className="block w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-slate-900 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm outline-none transition"
+                value={paymentSubMode}
+                onChange={(e) => setPaymentSubMode(e.target.value)}
+                className="block w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-slate-900 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm outline-none transition cursor-pointer font-medium"
               >
+                <option value="">-- Select specific payment mode (optional: UPI, Cash, Card...) --</option>
                 <option value="UPI">UPI</option>
                 <option value="Cash">Cash</option>
                 <option value="UPI+Cash">UPI+Cash</option>
@@ -707,10 +765,10 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
               <button
                 id="form-submit-claim"
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || user.status === "deactivated"}
                 className="w-full sm:w-auto px-6 py-2.5 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition shadow-md disabled:opacity-50 cursor-pointer"
               >
-                {submitting ? "Submitting Claim..." : "Submit Claim"}
+                {submitting ? "Submitting Claim..." : user.status === "deactivated" ? "Account Deactivated" : "Submit Claim"}
               </button>
             </div>
           </div>

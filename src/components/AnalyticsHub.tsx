@@ -116,11 +116,10 @@ export default function AnalyticsHub({ user, refreshTrigger }: AnalyticsHubProps
 
   // Chart 2: Payment Methods Usage
   const paymentMethodData = () => {
-    const methods: { [key: string]: number } = { UPI: 0, "Credit Card": 0, "Debit Card": 0, Cash: 0, "Bank Transfer": 0 };
+    const methods: { [key: string]: number } = {};
     activeExpenses.forEach(e => {
-      if (methods[e.paymentMethod] !== undefined) {
-        methods[e.paymentMethod] += e.totalAmount;
-      }
+      const pm = e.paymentMethod || "Personal Payment";
+      methods[pm] = (methods[pm] || 0) + e.totalAmount;
     });
 
     return Object.keys(methods).map(k => ({

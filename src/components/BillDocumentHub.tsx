@@ -18,6 +18,7 @@ import {
   generateBillFilename, 
   type FlatBillItem 
 } from "../lib/billDocumentGenerator";
+import EditExpenseModal from "./EditExpenseModal";
 import { 
   FileText, 
   Download, 
@@ -25,6 +26,7 @@ import {
   Filter, 
   Grid, 
   Eye, 
+  Edit3,
   Check, 
   Calendar, 
   User, 
@@ -40,6 +42,7 @@ import {
   Square,
   Trash2
 } from "lucide-react";
+
 
 interface BillDocumentHubProps {
   user: EmployeeProfile;
@@ -72,9 +75,11 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
 
-  // Admin Delete Voucher State
+  // Admin Delete Voucher & Edit State
   const [deletingBillItem, setDeletingBillItem] = useState<FlatBillItem | null>(null);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
 
   const confirmDeleteBillVoucher = async () => {
     if (!deletingBillItem) return;
@@ -100,7 +105,8 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
 
       if (isAdmin) {
         const empData = await getEmployees();
-        setEmployees(empData);
+        const nonAdminEmps = empData.filter(e => e.role !== "admin" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM");
+        setEmployees(nonAdminEmps);
       }
     } catch (err) {
       console.error("Error fetching data for Bill Document Hub:", err);
@@ -122,7 +128,10 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
         });
 
     if (isAdmin) {
-      getEmployees().then(empData => setEmployees(empData));
+      getEmployees().then(empData => {
+        const nonAdminEmps = empData.filter(e => e.role !== "admin" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM");
+        setEmployees(nonAdminEmps);
+      });
     }
 
     return () => unsub();
@@ -357,7 +366,7 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
                   <option value="all">All Employees ({employees.length})</option>
                   {employees.map((emp) => (
                     <option key={emp.employeeId} value={emp.employeeId}>
-                      {emp.name} ({emp.employeeId})
+                      {emp.name}
                     </option>
                   ))}
                 </select>
@@ -603,7 +612,7 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
                       </div>
                     )}
 
-                    {/* Preview & Delete Hover Action Overlay */}
+                    {/* Preview, Edit & Delete Hover Action Overlay */}
                     <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
                       <button
                         type="button"
@@ -612,6 +621,19 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
                       >
                         <Eye className="h-3.5 w-3.5 text-indigo-600" /> Preview
                       </button>
+                      {(isAdmin || bill.employeeId === user.employeeId) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const targetExp = expenses.find(e => e.id === bill.expenseId);
+                            if (targetExp) setEditingExpense(targetExp);
+                          }}
+                          className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+                          title="Edit Expense Data & Bills"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                       {isAdmin && (
                         <button
                           type="button"
@@ -623,6 +645,7 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
                         </button>
                       )}
                     </div>
+
                   </div>
 
                   {/* Card Meta Footer */}
@@ -637,6 +660,19 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
                     <div className="flex items-center justify-between text-[10px] text-slate-400">
                       <span className="truncate max-w-[120px]">{bill.vendor}</span>
                       <span>{bill.uploadDate}</span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-50">
+                      <span className="font-semibold text-slate-400">Payment:</span>
+                      <span className={`px-1.5 py-0.5 rounded font-bold text-[9px] ${
+                        bill.paymentMethod?.includes("SW Payment")
+                          ? "bg-purple-50 text-purple-700 border border-purple-100"
+                          : bill.paymentMethod?.includes("Personal Payment")
+                          ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
+                          : "bg-slate-100 text-slate-700"
+                      }`}>
+                        {bill.paymentMethod || "Personal Payment"}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -789,6 +825,21 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
           </div>
         </div>
       )}
+
+
+      {/* Edit Expense Modal */}
+
+      <EditExpenseModal
+        expense={editingExpense}
+        currentUser={user}
+        isOpen={!!editingExpense}
+        onClose={() => setEditingExpense(null)}
+        onSuccess={() => {
+          setEditingExpense(null);
+          fetchInitialData();
+        }}
+      />
     </div>
   );
 }
+

@@ -17,6 +17,7 @@ export interface FlatBillItem {
   amount: number;
   expenseDate: string;
   category: string;
+  paymentMethod?: string;
 }
 
 /**
@@ -145,6 +146,7 @@ export async function collectBillItems(
         amount: exp.totalAmount || exp.amount || 0,
         expenseDate: exp.date || new Date().toISOString().split("T")[0],
         category: exp.category || "General",
+        paymentMethod: exp.paymentMethod || "Personal Payment",
       });
 
       processedCount++;
@@ -327,6 +329,17 @@ export async function exportBillsToWordDocx(
                   text: `Voucher: ${item.voucherNumber} | ₹${item.amount}`,
                   size: 14,
                   color: "059669",
+                  bold: true,
+                }),
+              ],
+            }),
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [
+                new TextRun({
+                  text: `Payment: ${item.paymentMethod || "Personal Payment"}`,
+                  size: 13,
+                  color: "4F46E5",
                   bold: true,
                 }),
               ],
@@ -568,7 +581,13 @@ export async function exportBillsToPDF(
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(6.5);
       pdf.setTextColor(5, 150, 105); // Emerald-600
-      pdf.text(`Vchr: ${item.voucherNumber} | RS.${item.amount}`, cardX + 2, cardY + 11);
+      pdf.text(`Vchr: ${item.voucherNumber} | RS.${item.amount}`, cardX + 2, cardY + 10.5);
+
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(5.5);
+      pdf.setTextColor(79, 70, 229); // Indigo-600
+      const payText = `Pay: ${item.paymentMethod || "Personal Payment"}`;
+      pdf.text(payText.length > 26 ? payText.substring(0, 24) + "..." : payText, cardX + 2, cardY + 13.5);
 
       // Image Box inside card
       const imgBoxY = cardY + 12.5;

@@ -52,8 +52,9 @@ export default function Reports({ user, refreshTrigger }: ReportsProps) {
       if (user.role === "admin") {
         expData = await getExpenses();
         const empData = await getEmployees();
-        setEmployees(empData);
-        if (empData.length > 0) setSelectedEmployee(empData[0].employeeId);
+        const nonAdminEmps = empData.filter(e => e.role !== "admin" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM");
+        setEmployees(nonAdminEmps);
+        if (nonAdminEmps.length > 0) setSelectedEmployee(nonAdminEmps[0].employeeId);
       } else {
         expData = await getExpensesByEmployee(user.employeeId);
       }
@@ -122,9 +123,9 @@ export default function Reports({ user, refreshTrigger }: ReportsProps) {
       if (!dateStr) return "";
       const parts = dateStr.split("-");
       if (parts.length === 3 && parts[0].length === 4) {
-        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+        return `\t${parts[2]}/${parts[1]}/${parts[0]}`;
       }
-      return dateStr;
+      return `\t${dateStr}`;
     };
 
     // Define CSV Headers matching exact voucher bills structure
@@ -158,7 +159,11 @@ export default function Reports({ user, refreshTrigger }: ReportsProps) {
       }
 
       const typeOfExpense = exp.title || exp.category || "";
-      const methodOfPayment = (paymentMethod === "Bank Transfer" || paymentMethod === "Credit Card")
+      const methodOfPayment = exp.paymentMethod?.includes("SW Payment")
+        ? "SW Payment"
+        : exp.paymentMethod?.includes("Personal Payment")
+        ? "Personal Payment"
+        : (paymentMethod === "Bank Transfer" || paymentMethod === "Credit Card")
         ? "SW Payment"
         : "Personal Payment";
       const swPaymentStatus = exp.status === "reimbursed" ? "Paid" : exp.status === "approved" ? "Approved" : "";
@@ -184,6 +189,32 @@ export default function Reports({ user, refreshTrigger }: ReportsProps) {
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     link.setAttribute("download", `Voucher_Bills_${reportType}_${new Date().toISOString().split("T")[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportPivotSummaryCSV = () => {
+    if (reportData.length === 0) return;
+    const empMap: { [name: string]: number } = {};
+
+    reportData.forEach(exp => {
+      if (exp.status !== "approved" && exp.status !== "reimbursed") return;
+      const name = exp.employeeName || exp.employeeId || "Employee";
+      const amt = exp.totalAmount || exp.amount || 0;
+      empMap[name] = (empMap[name] || 0) + amt;
+    });
+
+    const headers = ["Paid by", "SUM of Amount"];
+    const rows = Object.entries(empMap).map(([name, sum]) => [`"${name.replace(/"/g, '""')}"`, sum.toFixed(2)]);
+    const grandTotal = Object.values(empMap).reduce((a, b) => a + b, 0);
+    rows.push(["Grand Total", grandTotal.toFixed(2)]);
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Pivot_Summary_${selectedMonth}_${selectedYear}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -293,6 +324,16 @@ export default function Reports({ user, refreshTrigger }: ReportsProps) {
 
         <div className="flex flex-wrap items-center gap-2.5">
           <button
+            id="export-pivot-csv-btn"
+            onClick={handleExportPivotSummaryCSV}
+            disabled={reportData.length === 0}
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition shadow-sm disabled:opacity-40 cursor-pointer"
+            title="Download clean Pivot Table summary (Paid by vs SUM of Amount)"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download Pivot Summary CSV
+          </button>
+          <button
             id="export-csv-btn"
             onClick={handleExportCSV}
             disabled={reportData.length === 0}
@@ -385,7 +426,7 @@ export default function Reports({ user, refreshTrigger }: ReportsProps) {
                 className="px-3 py-2 w-full border border-slate-200 rounded-xl text-slate-900 bg-slate-50 text-xs focus:bg-white outline-none"
               >
                 {employees.map(emp => (
-                  <option key={emp.employeeId} value={emp.employeeId}>{emp.name} ({emp.employeeId})</option>
+                  <option key={emp.employeeId} value={emp.employeeId}>{emp.name}</option>
                 ))}
               </select>
             </div>
