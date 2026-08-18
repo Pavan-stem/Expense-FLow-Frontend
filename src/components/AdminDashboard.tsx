@@ -42,7 +42,10 @@ import {
   Download,
   Eye,
   Edit3,
+  RotateCcw,
+  RotateCw,
   FileText,
+
   Filter,
   Check,
   X,
@@ -180,11 +183,13 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
 
 
-  // Localized image zoom & pan state for preview modal
+  // Localized image zoom, pan & rotation state for preview modal
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [rotateAngle, setRotateAngle] = useState(0);
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
+
 
   const handleModalSendRemark = async () => {
     if (!viewingVoucherDetails || !adminModalRemark.trim()) return;
@@ -260,15 +265,20 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
   useEffect(() => {
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
+    setRotateAngle(0);
     setIsPanning(false);
   }, [previewingBill]);
 
   const handleZoomIn = () => setZoomScale(s => Math.min(s + 0.25, 4));
   const handleZoomOut = () => setZoomScale(s => Math.max(s - 0.25, 0.5));
+  const handleRotateLeft = () => setRotateAngle(a => (a - 90 + 360) % 360);
+  const handleRotateRight = () => setRotateAngle(a => (a + 90) % 360);
   const handleZoomReset = () => {
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
+    setRotateAngle(0);
   };
+
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (zoomScale <= 1) return;
@@ -1268,8 +1278,9 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
       {/* CUSTOM MODAL: Delete Employee Confirmation */}
       {deletingEmployee && (
-        <div id="delete-employee-modal" className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 text-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col p-6 space-y-4">
+        <div id="delete-employee-modal" className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-3 md:p-6 z-[100] overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 text-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col p-6 space-y-4 z-[105]">
+
             <div className="flex items-center gap-3 text-rose-500">
               <span className="p-2 bg-rose-950 rounded-xl">
                 <Trash2 className="h-6 w-6" />
@@ -1342,8 +1353,9 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
       {/* DETAIL MODAL: Voucher Claim Specifications */}
       {viewingVoucherDetails && (
-        <div id="voucher-details-modal" className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-2xl max-w-2xl w-full overflow-hidden flex flex-col">
+        <div id="voucher-details-modal" className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-3 md:p-6 z-[100] overflow-y-auto">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-2xl max-w-2xl w-full overflow-hidden flex flex-col z-[105]">
+
             {/* Modal Header */}
             <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
               <div>
@@ -1661,8 +1673,8 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
       {/* Delete Voucher Confirmation Dialog Modal */}
       {deletingVoucherExpense && (
-        <div id="admin-delete-voucher-backdrop" className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-[100] flex items-center justify-center p-4">
-          <div id="admin-delete-voucher-modal" className="w-full max-w-md bg-white border border-slate-100 rounded-3xl shadow-2xl p-6">
+        <div id="admin-delete-voucher-backdrop" className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md z-[130] flex items-center justify-center p-4">
+          <div id="admin-delete-voucher-modal" className="w-full max-w-md bg-white border border-slate-100 rounded-3xl shadow-2xl p-6 z-[135]">
             <div className="flex items-start gap-4">
               <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl flex-shrink-0">
                 <Trash2 className="h-6 w-6" />
@@ -1696,10 +1708,11 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
       {/* MODAL: Document File Attachment Previewer */}
       {previewingBill && (
-        <div id="receipt-attachment-previewer" className="fixed inset-0 bg-slate-900/80 backdrop-blur-xs flex flex-col items-center justify-center p-4 z-55">
-          <div className="w-full max-w-4xl bg-slate-950 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[90vh]">
+        <div id="receipt-attachment-previewer" className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-3 md:p-6 z-[110]">
+          <div className="w-full max-w-4xl bg-slate-950 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[85vh] max-h-[85vh] z-[115]">
+
             {/* Previewer Header */}
-            <div className="p-4 bg-slate-900 border-b border-slate-800 text-white flex items-center justify-between">
+            <div className="p-4 bg-slate-900 border-b border-slate-800 text-white flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-2">
                 <FileText className="h-4 w-4 text-indigo-400" />
                 <span className="text-xs font-bold truncate max-w-md">{previewingBill.fileName}</span>
@@ -1728,6 +1741,34 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                 >
                   <span className="text-xs font-bold font-mono">+</span>
                 </button>
+
+                <div className="h-4 w-px bg-slate-800 mx-1" />
+
+                <button
+                  id="preview-rotate-left-btn"
+                  onClick={handleRotateLeft}
+                  className="p-1.5 text-indigo-400 hover:text-white hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                  title="Rotate Left (90°)"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+                <button
+                  id="preview-rotate-right-btn"
+                  onClick={handleRotateRight}
+                  className="p-1.5 text-indigo-400 hover:text-white hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                  title="Rotate Right (90°)"
+                >
+                  <RotateCw className="h-4 w-4" />
+                </button>
+
+                {rotateAngle !== 0 && (
+                  <span className="text-[10px] font-bold font-mono text-indigo-400 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-800">
+                    {rotateAngle}°
+                  </span>
+                )}
+
+                <div className="h-4 w-px bg-slate-800 mx-1" />
+
                 <button
                   id="preview-download-btn"
                   onClick={() => {
@@ -1758,7 +1799,8 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
             {/* Previewer Workspace Area */}
             <div 
-              className="flex-1 overflow-hidden relative flex items-center justify-center p-4 bg-slate-900 select-none cursor-grab active:cursor-grabbing"
+              className="flex-1 overflow-hidden relative flex items-center justify-center p-4 pb-16 bg-slate-900 select-none cursor-grab active:cursor-grabbing"
+
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUpOrLeave}
@@ -1768,9 +1810,10 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                 <div 
                   className="transition-transform duration-100 ease-out origin-center"
                   style={{
-                    transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`
+                    transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale}) rotate(${rotateAngle}deg)`
                   }}
                 >
+
                   <img
                     src={previewingBill.fileData}
                     alt={previewingBill.fileName}

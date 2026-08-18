@@ -6,7 +6,8 @@ import {
   type BillFile,
   type Expense
 } from "../lib/firebase";
-import { Upload, FileText, Image, Trash2, X, AlertTriangle, Sparkles, Receipt, Coins, Eye, ZoomIn, ZoomOut, RotateCcw, Calculator, Loader2, Plus, ChevronLeft, ChevronRight, UserCheck, Building2 } from "lucide-react";
+import { Upload, FileText, Image, Trash2, X, AlertTriangle, Sparkles, Receipt, Coins, Eye, ZoomIn, ZoomOut, RotateCcw, RotateCw, RefreshCw, Calculator, Loader2, Plus, ChevronLeft, ChevronRight, UserCheck, Building2 } from "lucide-react";
+
 import { motion, AnimatePresence } from "motion/react";
 
 interface ExpenseFormProps {
@@ -32,25 +33,31 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const [processingProgress, setProcessingProgress] = useState("");
 
-  // Localized image zoom & pan state
+  // Localized image zoom, pan & rotation state
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [rotateAngle, setRotateAngle] = useState(0);
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
-  // Reset zoom and pan on file preview change
+  // Reset zoom, pan, and rotation on file preview change
   useEffect(() => {
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
+    setRotateAngle(0);
     setIsPanning(false);
   }, [previewBill]);
 
   const handleZoomIn = () => setZoomScale(s => Math.min(s + 0.25, 4));
   const handleZoomOut = () => setZoomScale(s => Math.max(s - 0.25, 0.5));
+  const handleRotateLeft = () => setRotateAngle(a => (a - 90 + 360) % 360);
+  const handleRotateRight = () => setRotateAngle(a => (a + 90) % 360);
   const handleZoomReset = () => {
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
+    setRotateAngle(0);
   };
+
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (zoomScale <= 1) return;
@@ -781,17 +788,19 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
           <>
             <div
               id="file-preview-backdrop"
-              className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
+              className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[110] flex items-center justify-center p-3 md:p-6"
               onClick={() => setPreviewBill(null)}
             />
+
             <motion.div
               id="file-preview-modal"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-x-4 top-10 bottom-10 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-2xl md:h-[650px] bg-white border border-slate-100 rounded-3xl shadow-2xl z-[90] overflow-hidden flex flex-col"
+              className="fixed inset-x-3 inset-y-6 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 w-[95vw] md:w-full md:max-w-3xl h-[85vh] max-h-[85vh] bg-white border border-slate-100 rounded-3xl shadow-2xl z-[115] overflow-hidden flex flex-col"
             >
-              <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+
+              <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 flex-shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
                   <FileText className="h-4 w-4 text-indigo-600 flex-shrink-0" />
                   <span className="text-xs font-bold text-slate-700 truncate max-w-xs md:max-w-md">{previewBill.fileName}</span>
@@ -857,7 +866,8 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
                 </div>
               </div>
               <div
-                className="flex-1 bg-slate-100 p-4 flex items-center justify-center overflow-hidden relative"
+                className="flex-1 bg-slate-100 p-4 pb-16 flex items-center justify-center overflow-hidden relative"
+
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUpOrLeave}
@@ -880,12 +890,12 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
                         onDragStart={(e) => e.preventDefault()}
                         className={`max-w-full max-h-full object-contain rounded-xl shadow-md transition-transform duration-75 ease-out select-none ${zoomScale > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
                         style={{
-                          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale})`
+                          transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale}) rotate(${rotateAngle}deg)`
                         }}
                       />
                     </div>
 
-                    {/* Floating Zoom Controls specifically for this image viewport */}
+                    {/* Floating Zoom & Rotation Controls specifically for this image viewport */}
                     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 bg-white/90 backdrop-blur-md rounded-2xl border border-slate-200/80 shadow-lg z-10 select-none">
                       <button
                         type="button"
@@ -906,16 +916,45 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
                       >
                         <ZoomIn className="h-4 w-4" />
                       </button>
+
                       <div className="w-[1px] h-4 bg-slate-200" />
+
+                      <button
+                        type="button"
+                        onClick={handleRotateLeft}
+                        className="p-1 hover:bg-indigo-50 text-indigo-600 rounded-lg transition cursor-pointer"
+                        title="Rotate Left (90°)"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleRotateRight}
+                        className="p-1 hover:bg-indigo-50 text-indigo-600 rounded-lg transition cursor-pointer"
+                        title="Rotate Right (90°)"
+                      >
+                        <RotateCw className="h-4 w-4" />
+                      </button>
+
+                      {rotateAngle !== 0 && (
+                        <span className="text-[10px] font-bold font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                          {rotateAngle}°
+                        </span>
+                      )}
+
+                      <div className="w-[1px] h-4 bg-slate-200" />
+
                       <button
                         type="button"
                         onClick={handleZoomReset}
                         className="p-1 hover:bg-slate-200/80 text-slate-600 rounded-lg transition cursor-pointer"
                         title="Reset View"
                       >
-                        <RotateCcw className="h-4 w-4" />
+                        <RefreshCw className="h-4 w-4" />
                       </button>
                     </div>
+
                   </>
                 )}
               </div>

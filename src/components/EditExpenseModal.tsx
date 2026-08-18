@@ -21,7 +21,9 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  RotateCw,
   RefreshCw,
+
   Coins,
   ShieldCheck,
   Tag
@@ -122,6 +124,7 @@ export default function EditExpenseModal({
   const [loadingBillId, setLoadingBillId] = useState<string | null>(null);
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [rotateAngle, setRotateAngle] = useState(0);
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
@@ -129,12 +132,14 @@ export default function EditExpenseModal({
   const [submitting, setSubmitting] = useState(false);
   const [alertMsg, setAlertMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Reset preview zoom/pan
+  // Reset preview zoom/pan/rotation
   useEffect(() => {
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
+    setRotateAngle(0);
     setIsPanning(false);
   }, [previewingBill]);
+
 
   // Math expression evaluator for Amount
   const parseAmountExpression = (expr: string): number | null => {
@@ -414,14 +419,15 @@ export default function EditExpenseModal({
 
   return (
     <AnimatePresence>
-      <div id="edit-expense-modal-backdrop" className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4 overflow-y-auto">
+      <div id="edit-expense-modal-backdrop" className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md z-[100] flex items-center justify-center p-3 md:p-6 overflow-y-auto">
         <motion.div
           id="edit-expense-modal-card"
           initial={{ opacity: 0, scale: 0.96, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 15 }}
-          className="relative w-full max-w-3xl my-6 bg-white rounded-3xl border border-slate-100 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
+          className="relative w-full max-w-3xl my-6 bg-white rounded-3xl border border-slate-100 shadow-2xl overflow-hidden flex flex-col max-h-[92vh] z-[105]"
         >
+
           {/* Header */}
           <div className="px-6 py-5 border-b border-slate-100 bg-slate-50 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-3">
@@ -860,9 +866,10 @@ export default function EditExpenseModal({
 
       {/* Bill Preview Sub-Modal */}
       {previewingBill && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[90] flex items-center justify-center p-4">
-          <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+        <div className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[115] flex items-center justify-center p-3 md:p-6">
+          <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden flex flex-col h-[85vh] max-h-[85vh] z-[120]">
+
+            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60 flex-shrink-0">
               <div className="flex items-center gap-3">
                 <FileText className="h-5 w-5 text-indigo-400" />
                 <div>
@@ -871,12 +878,12 @@ export default function EditExpenseModal({
                 </div>
               </div>
 
-              {/* Zoom Controls */}
+              {/* Zoom & Rotation Controls */}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setZoomScale(s => Math.min(s + 0.25, 4))}
-                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs"
+                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs cursor-pointer"
                   title="Zoom In"
                 >
                   <ZoomIn className="h-4 w-4" />
@@ -884,23 +891,52 @@ export default function EditExpenseModal({
                 <button
                   type="button"
                   onClick={() => setZoomScale(s => Math.max(s - 0.25, 0.5))}
-                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs"
+                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs cursor-pointer"
                   title="Zoom Out"
                 >
                   <ZoomOut className="h-4 w-4" />
                 </button>
+
+                <div className="w-[1px] h-4 bg-slate-800" />
+
                 <button
                   type="button"
-                  onClick={() => { setZoomScale(1); setPanOffset({ x: 0, y: 0 }); }}
-                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs"
-                  title="Reset Zoom"
+                  onClick={() => setRotateAngle(a => (a - 90 + 360) % 360)}
+                  className="p-1.5 bg-slate-800 hover:bg-indigo-600 text-indigo-300 rounded-lg text-xs transition cursor-pointer"
+                  title="Rotate Left (90°)"
                 >
                   <RotateCcw className="h-4 w-4" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setRotateAngle(a => (a + 90) % 360)}
+                  className="p-1.5 bg-slate-800 hover:bg-indigo-600 text-indigo-300 rounded-lg text-xs transition cursor-pointer"
+                  title="Rotate Right (90°)"
+                >
+                  <RotateCw className="h-4 w-4" />
+                </button>
+
+                {rotateAngle !== 0 && (
+                  <span className="text-[10px] font-bold font-mono text-indigo-400 bg-indigo-950/80 px-1.5 py-0.5 rounded border border-indigo-800">
+                    {rotateAngle}°
+                  </span>
+                )}
+
+                <div className="w-[1px] h-4 bg-slate-800" />
+
+                <button
+                  type="button"
+                  onClick={() => { setZoomScale(1); setPanOffset({ x: 0, y: 0 }); setRotateAngle(0); }}
+                  className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs cursor-pointer"
+                  title="Reset View"
+                >
+                  <RefreshCw className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setPreviewingBill(null)}
-                  className="p-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs ml-2"
+                  className="p-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs ml-2 cursor-pointer"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -909,7 +945,8 @@ export default function EditExpenseModal({
 
             {/* Preview Viewport */}
             <div
-              className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-950 select-none"
+              className="flex-1 overflow-auto p-4 pb-16 flex items-center justify-center bg-slate-950 select-none relative"
+
               onMouseDown={(e) => {
                 if (zoomScale <= 1) return;
                 setIsPanning(true);
@@ -933,7 +970,7 @@ export default function EditExpenseModal({
                   src={previewingBill.dataUrl}
                   alt={previewingBill.file.fileName}
                   style={{
-                    transform: `scale(${zoomScale}) translate(${panOffset.x / zoomScale}px, ${panOffset.y / zoomScale}px)`,
+                    transform: `scale(${zoomScale}) translate(${panOffset.x / zoomScale}px, ${panOffset.y / zoomScale}px) rotate(${rotateAngle}deg)`,
                     transition: isPanning ? "none" : "transform 0.15s ease-out"
                   }}
                   className="max-h-[75vh] max-w-full object-contain cursor-grab active:cursor-grabbing rounded-xl shadow-2xl"

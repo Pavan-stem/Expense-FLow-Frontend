@@ -34,7 +34,9 @@ import {
   ZoomIn, 
   ZoomOut, 
   RotateCcw, 
+  RotateCw,
   X, 
+
   Layers, 
   Sparkles,
   FileCheck,
@@ -74,6 +76,14 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
   const [loadingBillData, setLoadingBillData] = useState(false);
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [rotateAngle, setRotateAngle] = useState(0);
+
+  useEffect(() => {
+    setZoomScale(1);
+    setPanOffset({ x: 0, y: 0 });
+    setRotateAngle(0);
+  }, [previewingBill]);
+
 
   // Admin Delete Voucher & Edit State
   const [deletingBillItem, setDeletingBillItem] = useState<FlatBillItem | null>(null);
@@ -688,10 +698,11 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
 
       {/* Bill Image Preview Modal */}
       {previewingBill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl border border-slate-200 flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[110] flex items-center justify-center p-3 md:p-6">
+          <div className="bg-white rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl border border-slate-200 flex flex-col h-[85vh] max-h-[85vh] z-[115]">
+
             {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 flex-shrink-0">
               <div>
                 <h3 className="text-sm font-bold text-slate-800">
                   {previewingBill.fileName}
@@ -718,16 +729,45 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
                 >
                   <ZoomOut className="h-4 w-4" />
                 </button>
+
+                <div className="w-[1px] h-4 bg-slate-300 mx-0.5" />
+
+                <button
+                  type="button"
+                  onClick={() => setRotateAngle((a) => (a - 90 + 360) % 360)}
+                  className="p-1.5 rounded-lg bg-slate-200 hover:bg-indigo-100 hover:text-indigo-600 text-slate-700 transition cursor-pointer"
+                  title="Rotate Left (90°)"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRotateAngle((a) => (a + 90) % 360)}
+                  className="p-1.5 rounded-lg bg-slate-200 hover:bg-indigo-100 hover:text-indigo-600 text-slate-700 transition cursor-pointer"
+                  title="Rotate Right (90°)"
+                >
+                  <RotateCw className="h-4 w-4" />
+                </button>
+
+                {rotateAngle !== 0 && (
+                  <span className="text-[10px] font-bold font-mono text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">
+                    {rotateAngle}°
+                  </span>
+                )}
+
+                <div className="w-[1px] h-4 bg-slate-300 mx-0.5" />
+
                 <button
                   type="button"
                   onClick={() => {
                     setZoomScale(1);
                     setPanOffset({ x: 0, y: 0 });
+                    setRotateAngle(0);
                   }}
                   className="p-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 transition cursor-pointer"
-                  title="Reset Zoom"
+                  title="Reset View"
                 >
-                  <RotateCcw className="h-4 w-4" />
+                  <RefreshCw className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
@@ -740,7 +780,8 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
             </div>
 
             {/* Modal Image Stage */}
-            <div className="flex-1 p-6 bg-slate-900 overflow-auto flex items-center justify-center min-h-[360px] relative">
+            <div className="flex-1 p-6 pb-16 bg-slate-900 overflow-auto flex items-center justify-center min-h-[360px] relative">
+
               {loadingBillData ? (
                 <div className="text-center space-y-3 text-white">
                   <RefreshCw className="h-8 w-8 text-indigo-400 animate-spin mx-auto" />
@@ -756,7 +797,7 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
                 ) : (
                   <div
                     style={{
-                      transform: `scale(${zoomScale}) translate(${panOffset.x}px, ${panOffset.y}px)`,
+                      transform: `scale(${zoomScale}) translate(${panOffset.x}px, ${panOffset.y}px) rotate(${rotateAngle}deg)`,
                       transition: "transform 0.15s ease-out",
                     }}
                     className="max-w-full max-h-[500px] flex items-center justify-center"
@@ -768,6 +809,7 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
                     />
                   </div>
                 )
+
               ) : (
                 <div className="text-slate-400 text-xs">Failed to load bill image data.</div>
               )}
@@ -794,8 +836,9 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
       )}
       {/* Admin Delete Voucher Confirmation Dialog */}
       {deletingBillItem && (
-        <div id="hub-delete-bill-backdrop" className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-[100] flex items-center justify-center p-4">
-          <div id="hub-delete-bill-modal" className="w-full max-w-md bg-white border border-slate-100 rounded-3xl shadow-2xl p-6 space-y-4">
+        <div id="hub-delete-bill-backdrop" className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md z-[130] flex items-center justify-center p-4">
+          <div id="hub-delete-bill-modal" className="w-full max-w-md bg-white border border-slate-100 rounded-3xl shadow-2xl p-6 space-y-4 z-[135]">
+
             <div className="flex items-start gap-4">
               <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl flex-shrink-0">
                 <Trash2 className="h-6 w-6" />

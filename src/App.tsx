@@ -133,10 +133,10 @@ export default function App() {
                   user={currentUser}
                   onSuccess={() => {
                     triggerRefresh();
-                    setActiveTab("expenses");
                   }}
                 />
               )}
+
 
               {activeTab === "expenses" && (
                 <ExpenseList
