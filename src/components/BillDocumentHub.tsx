@@ -71,8 +71,11 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [genProgressMsg, setGenProgressMsg] = useState<string>("");
 
-  // Preview Modal
+  // Preview Modal & Admin Edit/Delete State
   const [previewingBill, setPreviewingBill] = useState<FlatBillItem | null>(null);
+  const [deletingBillItem, setDeletingBillItem] = useState<FlatBillItem | null>(null);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [loadingBillData, setLoadingBillData] = useState(false);
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -96,12 +99,6 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
     setRotateAngle(0);
   }, [previewingBill]);
 
-
-
-  // Admin Delete Voucher & Edit State
-  const [deletingBillItem, setDeletingBillItem] = useState<FlatBillItem | null>(null);
-  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
 
 
   const confirmDeleteBillVoucher = async () => {
