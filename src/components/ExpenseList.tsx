@@ -391,21 +391,28 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
 
   const confirmDelete = async () => {
     if (!deletingExpense) return;
+    const targetExpenseObj = deletingExpense;
     const targetTitle = deletingExpense.title;
     const targetVoucher = deletingExpense.voucherNumber || "Voucher";
+
+    // Optimistically remove from state instantly (0ms latency feel)
+    setExpenses(prev => prev.filter(e => e.id !== targetExpenseObj.id));
+    if (selectedExpense?.id === targetExpenseObj.id) {
+      setSelectedExpense(null);
+    }
+    setDeletingExpense(null);
+    showToast("success", `✓ Expense claim "${targetTitle}" (${targetVoucher}) permanently deleted.`);
+
+    // Perform Firestore deletion asynchronously
     try {
-      await deleteExpense(deletingExpense.id, user.employeeId, user.name);
-      setExpenses(prev => prev.filter(e => e.id !== deletingExpense.id));
-      if (selectedExpense?.id === deletingExpense.id) {
-        setSelectedExpense(null);
-      }
-      setDeletingExpense(null);
-      showToast("success", `✓ Expense claim "${targetTitle}" (${targetVoucher}) permanently deleted.`);
+      await deleteExpense(targetExpenseObj.id, user.employeeId, user.name);
     } catch (err) {
       console.error(err);
+      fetchData(); // Revert state on failure
       showToast("error", `Failed to delete expense claim: ${err instanceof Error ? err.message : "Unknown error"}`);
     }
   };
+
 
   // Helper to load file from Firestore chunks and preview
   const handlePreviewBill = async (bill: BillFile) => {

@@ -83,16 +83,20 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
 
   const confirmDeleteBillVoucher = async () => {
     if (!deletingBillItem) return;
-    setIsDeleting(true);
+    const targetExpId = deletingBillItem.expenseId;
+
+    // Optimistically update local state for 0ms UI latency
+    setExpenses(prev => prev.filter(e => e.id !== targetExpId));
+    setDeletingBillItem(null);
+
     try {
-      await deleteExpense(deletingBillItem.expenseId, user.employeeId, user.name);
-      setDeletingBillItem(null);
+      await deleteExpense(targetExpId, user.employeeId, user.name);
     } catch (err) {
       console.error("Error deleting expense voucher in Bill Document Hub:", err);
-    } finally {
-      setIsDeleting(false);
+      fetchInitialData(); // Revert state on failure
     }
   };
+
 
 
   const isAdmin = user.role === "admin";

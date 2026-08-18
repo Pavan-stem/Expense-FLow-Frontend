@@ -9,7 +9,9 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  writeBatch,
   onSnapshot,
+
   query,
   where,
   orderBy,
@@ -541,10 +543,11 @@ const CHUNK_SIZE = 700000;
 
 export async function saveBillChunks(expenseId: string, billId: string, fileData: string): Promise<void> {
   const totalChunks = Math.ceil(fileData.length / CHUNK_SIZE);
+  const batch = writeBatch(db);
   for (let i = 0; i < totalChunks; i++) {
     const chunkData = fileData.substring(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
     const chunkId = `chunk_${billId}_${i}`;
-    await setDoc(doc(db, "bill_chunks", chunkId), {
+    batch.set(doc(db, "bill_chunks", chunkId), {
       billId,
       expenseId,
       chunkIndex: i,
@@ -552,6 +555,7 @@ export async function saveBillChunks(expenseId: string, billId: string, fileData
       chunkData
     });
   }
+  await batch.commit();
 }
 
 export async function getBillData(expenseId: string, billId: string): Promise<string> {
@@ -591,10 +595,18 @@ export async function getBillData(expenseId: string, billId: string): Promise<st
 export async function resequenceVouchersForMonth(yearMonth: string): Promise<void> {
   try {
     const monthPart = yearMonth.split("-")[1] || "01";
-    const expensesSnap = await getDocs(collection(db, "expenses"));
-    const expensesInMonth = expensesSnap.docs
-      .map(d => ({ id: d.id, ...d.data() } as Expense))
-      .filter(e => e.date && e.date.startsWith(yearMonth));
+    // Target only expenses belonging to this specific month using range queries
+    const startOfMonth = `${yearMonth}-01`;
+    const endOfMonth = `${yearMonth}-31\uf8ff`;
+    const q = query(
+      collection(db, "expenses"),
+      where("date", ">=", startOfMonth),
+      where("date", "<=", endOfMonth)
+    );
+    const snap = await getDocs(q);
+    const expensesInMonth = snap.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
+
+    if (expensesInMonth.length === 0) return;
 
     // Sort chronologically: earliest date first. If dates are the same, sort by createdDate.
     expensesInMonth.sort((a, b) => {
@@ -603,14 +615,15 @@ export async function resequenceVouchersForMonth(yearMonth: string): Promise<voi
       return (a.createdDate || "").localeCompare(b.createdDate || "");
     });
 
-    // Update each expense sequentially
+    const batch = writeBatch(db);
+    let hasUpdates = false;
+
     for (let i = 0; i < expensesInMonth.length; i++) {
       const exp = expensesInMonth[i];
       const nextNumber = i + 1;
       const padNum = String(nextNumber).padStart(3, "0");
       const newVoucherNumber = `SW-${monthPart}-${padNum}`;
 
-      // Update names of associated bills based on this voucher number
       const updatedBills = (exp.bills || []).map((b, idx) => {
         const originalFileName = b.fileName || "bill";
         const dotIndex = originalFileName.lastIndexOf(".");
@@ -625,16 +638,22 @@ export async function resequenceVouchersForMonth(yearMonth: string): Promise<voi
       });
 
       if (exp.voucherNumber !== newVoucherNumber) {
-        await updateDoc(doc(db, "expenses", exp.id), {
+        batch.update(doc(db, "expenses", exp.id), {
           voucherNumber: newVoucherNumber,
           bills: updatedBills
         });
+        hasUpdates = true;
       }
+    }
+
+    if (hasUpdates) {
+      await batch.commit();
     }
   } catch (error) {
     console.error("Error resequencing vouchers:", error);
   }
 }
+
 
 export async function submitExpense(expenseData: Omit<Expense, "id" | "status" | "createdDate" | "adminComments">): Promise<Expense> {
   try {
@@ -781,29 +800,38 @@ export async function updateExpenseWithBills(
     const oldExpense = expSnap.data() as Expense;
     const oldDate = oldExpense.date;
 
-    // 1. Delete removed bill chunks
-    for (const billId of removedBillIds) {
-      const q = query(
-        collection(db, "bill_chunks"),
-        where("expenseId", "==", expenseId),
-        where("billId", "==", billId)
-      );
-      const snap = await getDocs(q);
-      for (const d of snap.docs) {
-        await deleteDoc(doc(db, "bill_chunks", d.id));
-      }
+    // 1. Delete removed bill chunks in parallel
+    if (removedBillIds.length > 0) {
+      const deletePromises = removedBillIds.map(async (billId) => {
+        const q = query(
+          collection(db, "bill_chunks"),
+          where("expenseId", "==", expenseId),
+          where("billId", "==", billId)
+        );
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          const batch = writeBatch(db);
+          snap.docs.forEach(d => batch.delete(doc(db, "bill_chunks", d.id)));
+          await batch.commit();
+        }
+      });
+      await Promise.all(deletePromises);
     }
 
-    // 2. Save chunks for new bills and build clean bill metadata
+    // 2. Save chunks for new bills in parallel and build clean bill metadata
     const cleanNewBills: BillFile[] = [];
-    for (const bill of newBills) {
-      if (bill.fileData) {
-        await saveBillChunks(expenseId, bill.id, bill.fileData);
-      }
-      cleanNewBills.push({
-        ...bill,
-        fileData: "" // strip data URL before updating main doc
-      });
+    if (newBills.length > 0) {
+      await Promise.all(
+        newBills.map(async (bill) => {
+          if (bill.fileData) {
+            await saveBillChunks(expenseId, bill.id, bill.fileData);
+          }
+          cleanNewBills.push({
+            ...bill,
+            fileData: "" // strip data URL before updating main doc
+          });
+        })
+      );
     }
 
     // 3. Assemble combined bill metadata
@@ -825,51 +853,52 @@ export async function updateExpenseWithBills(
 
     await updateDoc(ref, cleanData);
 
-    // 5. Resequence vouchers if date changed or to update filenames
+    // 5. Resequence vouchers if date changed or to update filenames (asynchronous background execution)
     const newDate = updatedData.date || oldDate;
     if (oldDate && oldDate.substring(0, 7) !== (newDate && newDate.substring(0, 7))) {
-      await resequenceVouchersForMonth(oldDate.substring(0, 7));
+      resequenceVouchersForMonth(oldDate.substring(0, 7)).catch(console.error);
     }
     if (newDate) {
-      await resequenceVouchersForMonth(newDate.substring(0, 7));
+      resequenceVouchersForMonth(newDate.substring(0, 7)).catch(console.error);
     }
 
-    // 6. Log activity
-    await logActivity(
+    // 6. Log activity (async)
+    logActivity(
       updaterUserId,
       updaterName,
       `${updaterRole === "admin" ? "Admin" : "Employee"} Updated Expense`,
       `Updated expense ID: ${expenseId} (${oldExpense.voucherNumber || "N/A"})`
-    );
+    ).catch(console.error);
 
-    // 7. Notifications
+    // 7. Notifications (async)
     if (updaterRole === "admin" && oldExpense.employeeId !== updaterUserId) {
-      await createNotification(
+      createNotification(
         oldExpense.employeeId,
         "Expense Claim Updated by Admin",
         `Admin ${updaterName} updated details for your expense claim (${oldExpense.voucherNumber || oldExpense.title}).`,
         expenseId,
         oldExpense.voucherNumber
-      );
+      ).catch(console.error);
     } else if (updaterRole === "employee") {
-      const adminsQuery = query(collection(db, "users"), where("role", "==", "admin"));
-      const adminsSnap = await getDocs(adminsQuery);
-      for (const adminDoc of adminsSnap.docs) {
-        await createNotification(
-          adminDoc.id,
-          "Expense Claim Updated by Employee",
-          `${updaterName} updated expense claim (${oldExpense.voucherNumber || oldExpense.title}).`,
-          expenseId,
-          oldExpense.voucherNumber
-        );
-      }
+      (async () => {
+        const adminsQuery = query(collection(db, "users"), where("role", "==", "admin"));
+        const adminsSnap = await getDocs(adminsQuery);
+        for (const adminDoc of adminsSnap.docs) {
+          await createNotification(
+            adminDoc.id,
+            "Expense Claim Updated by Employee",
+            `${updaterName} updated expense claim (${oldExpense.voucherNumber || oldExpense.title}).`,
+            expenseId,
+            oldExpense.voucherNumber
+          );
+        }
+      })().catch(console.error);
     }
   } catch (error) {
     console.error("Error updating expense with bills:", error);
     throw error;
   }
 }
-
 
 export async function deleteExpense(id: string, employeeId: string, employeeName: string): Promise<void> {
   try {
@@ -881,27 +910,30 @@ export async function deleteExpense(id: string, employeeId: string, employeeName
       dateToUse = data.date;
     }
 
-    await deleteDoc(ref);
+    const batch = writeBatch(db);
+    batch.delete(ref);
 
-    // Also delete any bill chunks associated with this expense
+    // Fetch bill_chunks to delete in single batch
     const q = query(collection(db, "bill_chunks"), where("expenseId", "==", id));
     const snap = await getDocs(q);
-    for (const d of snap.docs) {
-      await deleteDoc(doc(db, "bill_chunks", d.id));
-    }
+    snap.docs.forEach(d => {
+      batch.delete(doc(db, "bill_chunks", d.id));
+    });
 
-    // Resequence remaining vouchers in the same month
+    await batch.commit();
+
+    // Resequence remaining vouchers in background
     if (dateToUse) {
       const yearMonth = dateToUse.substring(0, 7);
-      await resequenceVouchersForMonth(yearMonth);
+      resequenceVouchersForMonth(yearMonth).catch(console.error);
     }
 
-    await logActivity(
+    logActivity(
       employeeId,
       employeeName,
       "Delete Expense",
       `Deleted pending expense ID: ${id}`
-    );
+    ).catch(console.error);
   } catch (error) {
     console.error("Error deleting expense:", error);
     throw error;
@@ -917,30 +949,34 @@ export async function deleteBillAttachmentFromExpense(expenseId: string, billId:
     const data = expSnap.data() as Expense;
     const updatedBills = (data.bills || []).filter(b => b.id !== billId);
 
-    await updateDoc(ref, { bills: updatedBills });
+    const batch = writeBatch(db);
+    batch.update(ref, { bills: updatedBills });
 
-    // Delete chunks for this specific bill
+    // Delete chunks for this specific bill in same batch
     const q = query(
       collection(db, "bill_chunks"),
       where("expenseId", "==", expenseId),
       where("billId", "==", billId)
     );
     const snap = await getDocs(q);
-    for (const d of snap.docs) {
-      await deleteDoc(doc(db, "bill_chunks", d.id));
-    }
+    snap.docs.forEach(d => {
+      batch.delete(doc(db, "bill_chunks", d.id));
+    });
 
-    await logActivity(
+    await batch.commit();
+
+    logActivity(
       updaterUserId,
       updaterName,
       "Delete Bill Attachment",
       `Deleted receipt attachment ID ${billId} from expense ${expenseId}`
-    );
+    ).catch(console.error);
   } catch (error) {
     console.error("Error deleting bill attachment:", error);
     throw error;
   }
 }
+
 
 
 export async function getExpenses(): Promise<Expense[]> {

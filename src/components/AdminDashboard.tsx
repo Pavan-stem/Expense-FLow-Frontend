@@ -157,21 +157,27 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
   const confirmDeleteVoucher = async () => {
     if (!deletingVoucherExpense) return;
-    const targetTitle = deletingVoucherExpense.title;
-    const targetVoucher = deletingVoucherExpense.voucherNumber || "Voucher";
+    const targetObj = deletingVoucherExpense;
+    const targetTitle = targetObj.title;
+    const targetVoucher = targetObj.voucherNumber || "Voucher";
+
+    // Optimistic UI removal for 0ms latency feel
+    setExpenses(prev => prev.filter(e => e.id !== targetObj.id));
+    if (viewingVoucherDetails?.id === targetObj.id) {
+      setViewingVoucherDetails(null);
+    }
+    setDeletingVoucherExpense(null);
+    showToast("success", `✓ Expense claim "${targetTitle}" (${targetVoucher}) permanently deleted.`);
+
     try {
-      await deleteExpense(deletingVoucherExpense.id, user.employeeId, user.name);
-      setExpenses(prev => prev.filter(e => e.id !== deletingVoucherExpense.id));
-      if (viewingVoucherDetails?.id === deletingVoucherExpense.id) {
-        setViewingVoucherDetails(null);
-      }
-      setDeletingVoucherExpense(null);
-      showToast("success", `✓ Expense claim "${targetTitle}" (${targetVoucher}) permanently deleted.`);
+      await deleteExpense(targetObj.id, user.employeeId, user.name);
     } catch (err) {
       console.error("Error deleting expense:", err);
+      fetchData(); // Revert on failure
       showToast("error", `Failed to delete expense claim: ${err instanceof Error ? err.message : "Unknown error"}`);
     }
   };
+
 
 
   // Localized image zoom & pan state for preview modal
