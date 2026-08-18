@@ -132,6 +132,14 @@ export default function EditExpenseModal({
   const [submitting, setSubmitting] = useState(false);
   const [alertMsg, setAlertMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  // Lock body scrolling while Edit Modal is open
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, []);
+
   // Reset preview zoom/pan/rotation
   useEffect(() => {
     setZoomScale(1);
@@ -139,6 +147,7 @@ export default function EditExpenseModal({
     setRotateAngle(0);
     setIsPanning(false);
   }, [previewingBill]);
+
 
 
   // Math expression evaluator for Amount
@@ -419,15 +428,16 @@ export default function EditExpenseModal({
 
   return (
     <AnimatePresence>
-      <div id="edit-expense-modal-backdrop" className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md z-[100] flex items-center justify-center p-3 md:p-6 overflow-y-auto">
+      <div id="edit-expense-modal-backdrop" className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[80] flex items-center justify-center p-3 md:p-6 overflow-y-auto">
+
+
         <motion.div
           id="edit-expense-modal-card"
           initial={{ opacity: 0, scale: 0.96, y: 15 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 15 }}
-          className="relative w-full max-w-3xl my-6 bg-white rounded-3xl border border-slate-100 shadow-2xl overflow-hidden flex flex-col max-h-[92vh] z-[105]"
+          className="relative w-full max-w-3xl my-6 bg-white rounded-3xl border border-slate-100 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]"
         >
-
           {/* Header */}
           <div className="px-6 py-5 border-b border-slate-100 bg-slate-50 flex items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-3">
@@ -866,9 +876,9 @@ export default function EditExpenseModal({
 
       {/* Bill Preview Sub-Modal */}
       {previewingBill && (
-        <div className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[115] flex items-center justify-center p-3 md:p-6">
-          <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden flex flex-col h-[85vh] max-h-[85vh] z-[120]">
+        <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-[90] flex items-center justify-center p-3 md:p-6">
 
+          <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden flex flex-col h-[85vh] max-h-[85vh]">
             <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60 flex-shrink-0">
               <div className="flex items-center gap-3">
                 <FileText className="h-5 w-5 text-indigo-400" />

@@ -78,11 +78,24 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [rotateAngle, setRotateAngle] = useState(0);
 
+  // Lock body scrolling when any modal is active
+  useEffect(() => {
+    if (previewingBill || editingExpense || deletingBillItem) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [previewingBill, editingExpense, deletingBillItem]);
+
   useEffect(() => {
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
     setRotateAngle(0);
   }, [previewingBill]);
+
 
 
   // Admin Delete Voucher & Edit State
@@ -698,9 +711,9 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
 
       {/* Bill Image Preview Modal */}
       {previewingBill && (
-        <div className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[110] flex items-center justify-center p-3 md:p-6">
-          <div className="bg-white rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl border border-slate-200 flex flex-col h-[85vh] max-h-[85vh] z-[115]">
+        <div className="fixed inset-0 min-h-screen w-screen z-50 flex items-center justify-center bg-slate-950/95 backdrop-blur-md p-3 md:p-6">
 
+          <div className="bg-white rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl border border-slate-200 flex flex-col h-[85vh] max-h-[85vh]">
             {/* Modal Header */}
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 flex-shrink-0">
               <div>
@@ -836,9 +849,8 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
       )}
       {/* Admin Delete Voucher Confirmation Dialog */}
       {deletingBillItem && (
-        <div id="hub-delete-bill-backdrop" className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md z-[130] flex items-center justify-center p-4">
-          <div id="hub-delete-bill-modal" className="w-full max-w-md bg-white border border-slate-100 rounded-3xl shadow-2xl p-6 space-y-4 z-[135]">
-
+        <div id="hub-delete-bill-backdrop" className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs z-[100] flex items-center justify-center p-4">
+          <div id="hub-delete-bill-modal" className="w-full max-w-md bg-white border border-slate-100 rounded-3xl shadow-2xl p-6 space-y-4">
             <div className="flex items-start gap-4">
               <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl flex-shrink-0">
                 <Trash2 className="h-6 w-6" />

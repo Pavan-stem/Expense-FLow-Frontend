@@ -262,12 +262,25 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
     }
   };
 
+  // Lock body scrolling when any modal is active
+  useEffect(() => {
+    if (viewingVoucherDetails || previewingBill || editingExpense || deletingVoucherExpense || deletingEmployee) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [viewingVoucherDetails, previewingBill, editingExpense, deletingVoucherExpense, deletingEmployee]);
+
   useEffect(() => {
     setZoomScale(1);
     setPanOffset({ x: 0, y: 0 });
     setRotateAngle(0);
     setIsPanning(false);
   }, [previewingBill]);
+
 
   const handleZoomIn = () => setZoomScale(s => Math.min(s + 0.25, 4));
   const handleZoomOut = () => setZoomScale(s => Math.max(s - 0.25, 0.5));
@@ -1278,9 +1291,9 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
       {/* CUSTOM MODAL: Delete Employee Confirmation */}
       {deletingEmployee && (
-        <div id="delete-employee-modal" className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-3 md:p-6 z-[100] overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 text-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col p-6 space-y-4 z-[105]">
+        <div id="delete-employee-modal" className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto">
 
+          <div className="bg-slate-900 border border-slate-800 text-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col p-6 space-y-4">
             <div className="flex items-center gap-3 text-rose-500">
               <span className="p-2 bg-rose-950 rounded-xl">
                 <Trash2 className="h-6 w-6" />
@@ -1353,9 +1366,9 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
       {/* DETAIL MODAL: Voucher Claim Specifications */}
       {viewingVoucherDetails && (
-        <div id="voucher-details-modal" className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-3 md:p-6 z-[100] overflow-y-auto">
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-2xl max-w-2xl w-full overflow-hidden flex flex-col z-[105]">
+        <div id="voucher-details-modal" className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-3 md:p-6 z-50 overflow-y-auto">
 
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-2xl max-w-2xl w-full overflow-hidden flex flex-col">
             {/* Modal Header */}
             <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
               <div>
@@ -1673,8 +1686,9 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
       {/* Delete Voucher Confirmation Dialog Modal */}
       {deletingVoucherExpense && (
-        <div id="admin-delete-voucher-backdrop" className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md z-[130] flex items-center justify-center p-4">
-          <div id="admin-delete-voucher-modal" className="w-full max-w-md bg-white border border-slate-100 rounded-3xl shadow-2xl p-6 z-[135]">
+        <div id="admin-delete-voucher-backdrop" className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+
+          <div id="admin-delete-voucher-modal" className="w-full max-w-md bg-white border border-slate-100 rounded-3xl shadow-2xl p-6">
             <div className="flex items-start gap-4">
               <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl flex-shrink-0">
                 <Trash2 className="h-6 w-6" />
@@ -1708,9 +1722,9 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
       {/* MODAL: Document File Attachment Previewer */}
       {previewingBill && (
-        <div id="receipt-attachment-previewer" className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-3 md:p-6 z-[110]">
-          <div className="w-full max-w-4xl bg-slate-950 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[85vh] max-h-[85vh] z-[115]">
+        <div id="receipt-attachment-previewer" className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-3 md:p-6 z-55">
 
+          <div className="w-full max-w-4xl bg-slate-950 rounded-2xl overflow-hidden shadow-2xl flex flex-col h-[85vh] max-h-[85vh]">
             {/* Previewer Header */}
             <div className="p-4 bg-slate-900 border-b border-slate-800 text-white flex items-center justify-between flex-shrink-0">
               <div className="flex items-center gap-2">

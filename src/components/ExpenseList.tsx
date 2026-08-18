@@ -66,9 +66,13 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
+
   const [previewingBill, setPreviewingBill] = useState<BillFile | null>(null);
   const [deletingExpense, setDeletingExpense] = useState<Expense | null>(null);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+
+
 
   // Localized image zoom, pan & rotation state for preview modal
   const [zoomScale, setZoomScale] = useState(1);
@@ -95,6 +99,18 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
     }, 4500);
   };
 
+  // Lock body scrolling when any modal is active
+  useEffect(() => {
+    if (selectedExpense || previewingBill || editingExpense || deletingExpense) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "unset";
+    }
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, [selectedExpense, previewingBill, editingExpense, deletingExpense]);
+
   // Reset zoom, pan, and rotation when previewingBill changes
   useEffect(() => {
     setZoomScale(1);
@@ -102,6 +118,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
     setRotateAngle(0);
     setIsPanning(false);
   }, [previewingBill]);
+
 
   const handleZoomIn = () => setZoomScale(s => Math.min(s + 0.25, 4));
   const handleZoomOut = () => setZoomScale(s => Math.max(s - 0.25, 0.5));
@@ -140,8 +157,8 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
   const [filterStatus, setFilterStatus] = useState("");
 
   // Detailed Modal states
-  const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
   const [loadingBillId, setLoadingBillId] = useState<string | null>(null);
+
 
   // Track viewed expense timestamps to manage unread badges
   const [viewedExpenseTimestamps, setViewedExpenseTimestamps] = useState<Record<string, number>>(() => {
@@ -993,15 +1010,15 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       <AnimatePresence>
         {selectedExpense && (
           <>
-            <div id="claim-modal-backdrop" className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md z-[100] flex items-center justify-center p-3 md:p-6" onClick={() => setSelectedExpense(null)} />
+            <div id="claim-modal-backdrop" className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[60] flex items-center justify-center p-3 md:p-6" onClick={() => setSelectedExpense(null)} />
+
             <motion.div
               id="claim-modal-content"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-x-3 inset-y-6 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 w-[95vw] md:w-full md:max-w-3xl h-[88vh] max-h-[88vh] bg-white border border-slate-100 rounded-3xl shadow-2xl z-[105] overflow-hidden flex flex-col"
+              className="fixed inset-x-4 top-4 bottom-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-3xl md:max-h-[90vh] md:h-auto bg-white border border-slate-100 rounded-3xl shadow-2xl z-[70] overflow-hidden flex flex-col"
             >
-
               {/* Header */}
               <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50">
                 <div className="flex items-center gap-3">
@@ -1382,18 +1399,18 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
           <>
             <div 
               id="list-receipt-preview-backdrop" 
-              className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md z-[110] flex items-center justify-center p-3 md:p-6" 
+              className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[80] flex items-center justify-center p-3 md:p-6" 
               onClick={() => setPreviewingBill(null)} 
             />
+
 
             <motion.div
               id="list-receipt-preview-modal"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-x-3 inset-y-6 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 w-[95vw] md:w-full md:max-w-3xl h-[85vh] max-h-[85vh] bg-white border border-slate-100 rounded-3xl shadow-2xl z-[115] overflow-hidden flex flex-col"
+              className="fixed inset-x-3 inset-y-6 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 w-[95vw] md:w-full md:max-w-3xl h-[85vh] max-h-[85vh] bg-white border border-slate-100 rounded-3xl shadow-2xl z-[90] overflow-hidden flex flex-col"
             >
-
               <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 flex-shrink-0">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-indigo-600" />
@@ -1512,17 +1529,17 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
           <>
             <div 
               id="delete-confirm-backdrop" 
-              className="fixed inset-0 min-h-screen w-screen bg-slate-950/90 backdrop-blur-md z-[130] flex items-center justify-center p-4" 
+              className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[100] flex items-center justify-center p-4" 
               onClick={() => setDeletingExpense(null)} 
             />
+
             <motion.div
               id="delete-confirm-modal"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white border border-slate-100 rounded-3xl shadow-2xl z-[135] overflow-hidden p-6"
+              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white border border-slate-100 rounded-3xl shadow-2xl z-[110] overflow-hidden p-6"
             >
-
               <div className="flex items-start gap-4">
                 <div className="p-3 bg-rose-50 text-rose-600 rounded-2xl flex-shrink-0">
                   <Trash2 className="h-6 w-6" />

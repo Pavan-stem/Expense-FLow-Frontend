@@ -788,7 +788,7 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
           <>
             <div
               id="file-preview-backdrop"
-              className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[110] flex items-center justify-center p-3 md:p-6"
+              className="fixed inset-0 min-h-screen w-screen bg-slate-950/80 backdrop-blur-md z-[80] flex items-center justify-center p-3 md:p-6"
               onClick={() => setPreviewBill(null)}
             />
 
@@ -797,9 +797,8 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed inset-x-3 inset-y-6 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 w-[95vw] md:w-full md:max-w-3xl h-[85vh] max-h-[85vh] bg-white border border-slate-100 rounded-3xl shadow-2xl z-[115] overflow-hidden flex flex-col"
+              className="fixed inset-x-3 inset-y-6 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 w-[95vw] md:w-full md:max-w-3xl h-[85vh] max-h-[85vh] bg-white border border-slate-100 rounded-3xl shadow-2xl z-[90] overflow-hidden flex flex-col"
             >
-
               <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 flex-shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
                   <FileText className="h-4 w-4 text-indigo-600 flex-shrink-0" />
