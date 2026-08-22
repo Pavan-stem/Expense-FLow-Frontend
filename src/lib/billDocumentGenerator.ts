@@ -181,8 +181,9 @@ export function generateBillFilename(
 export async function exportBillsToWordDocx(
   bills: FlatBillItem[],
   employeeName: string,
-  gridDensity: 9 | 12 = 12,
-  onProgress?: (status: string) => void
+  gridDensity: 9 | 12 = 9,
+  onProgress?: (status: string) => void,
+  dateLabel?: string
 ): Promise<void> {
   if (onProgress) onProgress("Preparing images for Word Document...");
 
@@ -466,7 +467,7 @@ export async function exportBillsToWordDocx(
   const blob = await Packer.toBlob(doc);
 
   // Trigger download
-  const filename = generateBillFilename(employeeName, "docx", uploadDate);
+  const filename = generateBillFilename(employeeName, "docx", dateLabel || uploadDate);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -483,8 +484,9 @@ export async function exportBillsToWordDocx(
 export async function exportBillsToPDF(
   bills: FlatBillItem[],
   employeeName: string,
-  gridDensity: 9 | 12 = 12,
-  onProgress?: (status: string) => void
+  gridDensity: 9 | 12 = 9,
+  onProgress?: (status: string) => void,
+  dateLabel?: string
 ): Promise<void> {
   if (onProgress) onProgress("Initializing PDF layout generator...");
 
@@ -650,6 +652,6 @@ export async function exportBillsToPDF(
   }
 
   if (onProgress) onProgress("Saving PDF file...");
-  const filename = generateBillFilename(employeeName, "pdf", uploadDate);
+  const filename = generateBillFilename(employeeName, "pdf", dateLabel || uploadDate);
   pdf.save(filename);
 }

@@ -61,7 +61,9 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
   const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toLocaleString("default", { month: "long" }));
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [gridDensity, setGridDensity] = useState<9 | 12>(12); // 9 or 12 images per document sheet
+  const [gridDensity, setGridDensity] = useState<9 | 12>(9); // 9 or 12 images per document sheet
+  const [selectedDay, setSelectedDay] = useState<string>(""); // "" = full month, "YYYY-MM-DD" = specific day
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   // Selection
   const [selectedBillIds, setSelectedBillIds] = useState<Set<string>>(new Set());
@@ -228,9 +230,24 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
     });
   });
 
-  // Bills to include in document (either explicitly selected or all filtered)
+  // Group allFilteredBills by expenseDate (must be before billsToExport)
+  const billsByDate: Record<string, FlatBillItem[]> = {};
+  allFilteredBills.forEach((bill) => {
+    const dateKey = bill.expenseDate || bill.uploadDate || "Unknown";
+    if (!billsByDate[dateKey]) billsByDate[dateKey] = [];
+    billsByDate[dateKey].push(bill);
+  });
+  const sortedDateKeys = Object.keys(billsByDate).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  // Bills to include in document:
+  // - if a specific day is selected → only bills for that day
+  // - if card multi-selections exist → use those
+  // - otherwise → all filtered bills (full month)
   const billsToExport =
-    selectedBillIds.size > 0
+    selectedDay && billsByDate[selectedDay]
+      ? billsByDate[selectedDay]
+      : selectedBillIds.size > 0
       ? allFilteredBills.filter((b) => selectedBillIds.has(b.billId))
       : allFilteredBills;
 
@@ -309,7 +326,8 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
         itemsToExport,
         activeEmployeeName,
         gridDensity,
-        (statusMsg) => setGenProgressMsg(statusMsg)
+        (statusMsg) => setGenProgressMsg(statusMsg),
+        selectedDay || undefined
       );
     } catch (err) {
       console.error("Failed to generate Word document:", err);
@@ -340,7 +358,8 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
         itemsToExport,
         activeEmployeeName,
         gridDensity,
-        (statusMsg) => setGenProgressMsg(statusMsg)
+        (statusMsg) => setGenProgressMsg(statusMsg),
+        selectedDay || undefined
       );
     } catch (err) {
       console.error("Failed to generate PDF document:", err);
@@ -350,6 +369,39 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
       setGenProgressMsg("");
     }
   };
+
+  // Build calendar grid for the selected month/year
+  const isCalendarAvailable = selectedMonth !== "All" && selectedYear !== "All";
+  const calMonthIndex = monthsList.indexOf(selectedMonth) - 1;
+  const calYear = parseInt(selectedYear);
+
+  type CalDay = { date: string; day: number; isCurrentMonth: boolean; hasBills: boolean; isToday: boolean };
+  const calendarDays: CalDay[] = [];
+
+  if (isCalendarAvailable) {
+    const firstOfMonth = new Date(calYear, calMonthIndex, 1);
+    const daysInMonth = new Date(calYear, calMonthIndex + 1, 0).getDate();
+    const startDow = (firstOfMonth.getDay() + 6) % 7;
+    const prevMonthTotal = new Date(calYear, calMonthIndex, 0).getDate();
+    for (let i = startDow - 1; i >= 0; i--) {
+      const d = prevMonthTotal - i;
+      const pm = calMonthIndex === 0 ? 11 : calMonthIndex - 1;
+      const py = calMonthIndex === 0 ? calYear - 1 : calYear;
+      const dateStr = `${py}-${String(pm + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      calendarDays.push({ date: dateStr, day: d, isCurrentMonth: false, hasBills: false, isToday: false });
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${calYear}-${String(calMonthIndex + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      calendarDays.push({ date: dateStr, day: d, isCurrentMonth: true, hasBills: !!billsByDate[dateStr], isToday: dateStr === todayStr });
+    }
+    const rem = 42 - calendarDays.length;
+    for (let d = 1; d <= rem; d++) {
+      const nm = calMonthIndex === 11 ? 0 : calMonthIndex + 1;
+      const ny = calMonthIndex === 11 ? calYear + 1 : calYear;
+      const dateStr = `${ny}-${String(nm + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      calendarDays.push({ date: dateStr, day: d, isCurrentMonth: false, hasBills: false, isToday: false });
+    }
+  }
 
   return (
     <div id="bill-document-hub" className="space-y-6">
@@ -431,6 +483,122 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
               </select>
             </div>
 
+            {isCalendarAvailable && (
+              <div className="relative">
+                {/* Calendar Trigger Button */}
+                <button
+                  id="calendar-trigger-btn"
+                  type="button"
+                  onClick={() => setCalendarOpen((o) => !o)}
+                  className={`flex items-center gap-2 border rounded-xl px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                    selectedDay
+                      ? "bg-indigo-600 border-indigo-600 text-white"
+                      : "bg-slate-50 border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"
+                  }`}
+                >
+                  <Calendar className="h-3.5 w-3.5" />
+                  <span>
+                    {selectedDay
+                      ? selectedDay === todayStr
+                        ? `Today (${selectedDay})`
+                        : selectedDay
+                      : `${selectedMonth}, ${selectedYear}`}
+                  </span>
+                  {selectedDay && (
+                    <span
+                      role="button"
+                      onClick={(e) => { e.stopPropagation(); setSelectedDay(""); setCalendarOpen(false); }}
+                      className="ml-1 text-white/80 hover:text-white font-bold leading-none cursor-pointer"
+                      title="Clear date selection"
+                    >
+                      ×
+                    </span>
+                  )}
+                </button>
+
+                {/* Calendar Popup */}
+                {calendarOpen && (
+                  <div
+                    id="calendar-popup"
+                    className="absolute top-full mt-2 left-0 z-50 bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 w-72"
+                  >
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-sm font-bold text-slate-800">
+                        {selectedMonth}, {selectedYear}
+                      </span>
+                    </div>
+
+                    {/* Day-of-week headers */}
+                    <div className="grid grid-cols-7 mb-1">
+                      {["Mo","Tu","We","Th","Fr","Sa","Su"].map((d) => (
+                        <div key={d} className="text-center text-[10px] font-bold text-slate-400 py-1">{d}</div>
+                      ))}
+                    </div>
+
+                    {/* Day cells */}
+                    <div className="grid grid-cols-7 gap-y-0.5">
+                      {calendarDays.map((cell) => {
+                        const isSelected = cell.date === selectedDay;
+                        return (
+                          <button
+                            key={cell.date}
+                            type="button"
+                            disabled={!cell.isCurrentMonth}
+                            onClick={() => {
+                              if (!cell.isCurrentMonth) return;
+                              setSelectedDay(cell.date === selectedDay ? "" : cell.date);
+                              setCalendarOpen(false);
+                            }}
+                            className={`relative h-8 w-full rounded-lg text-xs font-semibold transition flex flex-col items-center justify-center cursor-pointer disabled:cursor-default ${
+                              !cell.isCurrentMonth
+                                ? "text-slate-300"
+                                : isSelected
+                                ? "bg-slate-900 text-white"
+                                : cell.isToday
+                                ? "border-2 border-slate-900 text-slate-900 hover:bg-slate-100"
+                                : cell.hasBills
+                                ? "text-indigo-700 hover:bg-indigo-50"
+                                : "text-slate-600 hover:bg-slate-100"
+                            }`}
+                          >
+                            {cell.day}
+                            {/* Dot indicator for days with bills */}
+                            {cell.isCurrentMonth && cell.hasBills && !isSelected && (
+                              <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-indigo-500" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedDay(""); setCalendarOpen(false); }}
+                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer transition"
+                      >
+                        Clear
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (billsByDate[todayStr]) {
+                            setSelectedDay(todayStr);
+                          }
+                          setCalendarOpen(false);
+                        }}
+                        className="text-xs font-semibold text-slate-700 hover:text-slate-900 cursor-pointer transition"
+                      >
+                        Today
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs">
               <Grid className="h-3.5 w-3.5 text-slate-400" />
               <span className="text-slate-500 font-semibold">Density:</span>
@@ -440,8 +608,8 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
                 onChange={(e) => setGridDensity(Number(e.target.value) as 9 | 12)}
                 className="bg-transparent font-bold text-indigo-700 focus:outline-none cursor-pointer"
               >
-                <option value={12}>12 Images / Page (3x4 Grid)</option>
                 <option value={9}>9 Images / Page (3x3 Grid)</option>
+                <option value={12}>12 Images / Page (3x4 Grid)</option>
               </select>
             </div>
           </div>
@@ -529,6 +697,7 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
           </div>
         )}
       </div>
+
 
       {/* Bill Grid / Cards List Section */}
       <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm space-y-4">
