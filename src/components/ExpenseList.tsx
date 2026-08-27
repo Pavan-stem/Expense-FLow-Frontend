@@ -29,7 +29,8 @@ import EditExpenseModal from "./EditExpenseModal";
 import { 
   Search, 
   Filter, 
-  ChevronRight, 
+  ChevronRight,
+  ChevronLeft,
   CheckCircle, 
   XCircle, 
   Clock, 
@@ -69,6 +70,8 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
 
   const [previewingBill, setPreviewingBill] = useState<BillFile | null>(null);
+  const [previewBillIndex, setPreviewBillIndex] = useState<number>(0);
+  const [previewBills, setPreviewBills] = useState<BillFile[]>([]);
   const [deletingExpense, setDeletingExpense] = useState<Expense | null>(null);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
@@ -91,6 +94,33 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
   const [activeActionStatus, setActiveActionStatus] = useState<string | null>(null);
   const [adminComment, setAdminComment] = useState("");
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  // Single expense export loading
+  const [singleDocLoading, setSingleDocLoading] = useState(false);
+
+  // Detailed Modal bill loading
+  const [loadingBillId, setLoadingBillId] = useState<string | null>(null);
+
+  // Bulk Approval states
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  // Search and Filter states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterEmployee, setFilterEmployee] = useState("");
+  const [filterMonth, setFilterMonth] = useState(new Date().toLocaleString("default", { month: "long" }));
+  const [filterYear, setFilterYear] = useState(new Date().getFullYear().toString());
+  const [filterCategory, setFilterCategory] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+
+  // Track viewed expense timestamps to manage unread badges
+  const [viewedExpenseTimestamps, setViewedExpenseTimestamps] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem(`viewed_expenses_${user.employeeId}`);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
 
   const showToast = (type: "success" | "error", message: string) => {
     setToast({ type, message });
@@ -118,6 +148,47 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
     setRotateAngle(0);
     setIsPanning(false);
   }, [previewingBill]);
+
+  // Navigate to prev / next bill in the preview carousel (stable ref for useEffect)
+  const navigatePreview = React.useCallback(async (direction: -1 | 1) => {
+    if (!selectedExpense || previewBills.length <= 1) return;
+    const newIdx = (previewBillIndex + direction + previewBills.length) % previewBills.length;
+    const targetBill = previewBills[newIdx];
+    setPreviewBillIndex(newIdx);
+
+    if (targetBill.fileData) {
+      setPreviewingBill(targetBill);
+      return;
+    }
+
+    setLoadingBillId(targetBill.id);
+    try {
+      const fullData = await getBillData(selectedExpense.id, targetBill.id);
+      const loaded = { ...targetBill, fileData: fullData };
+      setPreviewBills(prev => prev.map(b => b.id === targetBill.id ? loaded : b));
+      setPreviewingBill(loaded);
+    } catch (err) {
+      console.error("Failed to load receipt data for navigation:", err);
+    } finally {
+      setLoadingBillId(null);
+    }
+  }, [selectedExpense, previewBills, previewBillIndex]);
+
+  // Keyboard arrow navigation for bill preview
+  useEffect(() => {
+    if (!previewingBill || previewBills.length <= 1) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+        e.preventDefault();
+        navigatePreview(1);
+      } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+        e.preventDefault();
+        navigatePreview(-1);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [previewingBill, previewBills.length, navigatePreview]);
 
 
   const handleZoomIn = () => setZoomScale(s => Math.min(s + 0.25, 4));
@@ -148,27 +219,6 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
     setIsPanning(false);
   };
   
-  // Search and Filter states
-  const [searchQuery, setSearchQuery] = useState("");
-  const [filterEmployee, setFilterEmployee] = useState("");
-  const [filterMonth, setFilterMonth] = useState(new Date().toLocaleString("default", { month: "long" }));
-  const [filterYear, setFilterYear] = useState(new Date().getFullYear().toString());
-  const [filterCategory, setFilterCategory] = useState("");
-  const [filterStatus, setFilterStatus] = useState("");
-
-  // Detailed Modal states
-  const [loadingBillId, setLoadingBillId] = useState<string | null>(null);
-
-
-  // Track viewed expense timestamps to manage unread badges
-  const [viewedExpenseTimestamps, setViewedExpenseTimestamps] = useState<Record<string, number>>(() => {
-    try {
-      const saved = localStorage.getItem(`viewed_expenses_${user.employeeId}`);
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
 
   const markExpenseAsViewed = React.useCallback((expenseId: string, voucherNumber?: string) => {
     const now = Date.now();
@@ -202,8 +252,6 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
     return unread.length;
   };
 
-  // Bulk Approval states
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   // Fetch all data
   const fetchData = async () => {
@@ -440,8 +488,13 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
 
 
   // Helper to load file from Firestore chunks and preview
-  const handlePreviewBill = async (bill: BillFile) => {
+  const handlePreviewBill = async (bill: BillFile, allBills?: BillFile[]) => {
     if (!selectedExpense) return;
+    const bills = allBills ?? selectedExpense.bills;
+    const idx = bills.findIndex(b => b.id === bill.id);
+    setPreviewBills(bills);
+    setPreviewBillIndex(idx >= 0 ? idx : 0);
+
     if (bill.fileData) {
       setPreviewingBill(bill);
       return;
@@ -450,16 +503,18 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
     setLoadingBillId(bill.id);
     try {
       const fullData = await getBillData(selectedExpense.id, bill.id);
-      setPreviewingBill({
-        ...bill,
-        fileData: fullData
-      });
+      const loaded = { ...bill, fileData: fullData };
+      // Cache the loaded data back into previewBills list
+      setPreviewBills(prev => prev.map(b => b.id === bill.id ? loaded : b));
+      setPreviewingBill(loaded);
     } catch (err) {
       console.error("Failed to load receipt data for preview:", err);
     } finally {
       setLoadingBillId(null);
     }
   };
+
+  // Navigate to prev / next bill — implemented above as useCallback before useEffect
 
   // Helper to load file from Firestore chunks and download
   const handleDownloadBill = async (bill: BillFile) => {
@@ -484,8 +539,6 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
     link.click();
     document.body.removeChild(link);
   };
-
-  const [singleDocLoading, setSingleDocLoading] = useState(false);
 
   const handleExportSingleExpenseDocx = async (expense: Expense) => {
     if (!expense.bills || expense.bills.length === 0) return;
@@ -1171,7 +1224,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                           <div className="flex items-center gap-1.5">
                             <button
                               id={`preview-receipt-bill-${bill.id}`}
-                              onClick={() => handlePreviewBill(bill)}
+                              onClick={() => handlePreviewBill(bill, selectedExpense.bills)}
                               disabled={loadingBillId !== null}
                               className="p-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-lg border border-indigo-100 transition cursor-pointer disabled:opacity-50"
                               title="Preview Receipt"
@@ -1412,27 +1465,87 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
               className="fixed inset-x-3 inset-y-6 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 w-[95vw] md:w-full md:max-w-3xl h-[85vh] max-h-[85vh] bg-white border border-slate-100 rounded-3xl shadow-2xl z-[90] overflow-hidden flex flex-col"
             >
               <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50 flex-shrink-0">
-                <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-indigo-600" />
-                  <span className="text-xs font-bold text-slate-700 truncate max-w-xs md:max-w-md">{previewingBill.fileName}</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <FileText className="h-4 w-4 text-indigo-600 flex-shrink-0" />
+                  <span className="text-xs font-bold text-slate-700 truncate max-w-[180px] md:max-w-md">{previewingBill.fileName}</span>
+                  {previewBills.length > 1 && (
+                    <span className="ml-1 flex-shrink-0 text-[10px] font-bold font-mono px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-full border border-indigo-200">
+                      {previewBillIndex + 1} / {previewBills.length}
+                    </span>
+                  )}
                 </div>
-                <button
-                  id="close-list-receipt-preview-btn"
-                  type="button"
-                  onClick={() => setPreviewingBill(null)}
-                  className="p-1 hover:bg-slate-200 text-slate-400 hover:text-slate-600 rounded-lg transition"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-1.5 flex-shrink-0">
+                  {previewBills.length > 1 && (
+                    <>
+                      <button
+                        id="preview-prev-bill-btn"
+                        type="button"
+                        onClick={() => navigatePreview(-1)}
+                        disabled={loadingBillId !== null}
+                        className="p-1.5 hover:bg-indigo-50 text-indigo-600 rounded-lg border border-indigo-100 bg-white transition cursor-pointer disabled:opacity-40 shadow-sm"
+                        title="Previous bill (← arrow key)"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      <button
+                        id="preview-next-bill-btn"
+                        type="button"
+                        onClick={() => navigatePreview(1)}
+                        disabled={loadingBillId !== null}
+                        className="p-1.5 hover:bg-indigo-50 text-indigo-600 rounded-lg border border-indigo-100 bg-white transition cursor-pointer disabled:opacity-40 shadow-sm"
+                        title="Next bill (→ arrow key)"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                      <div className="w-[1px] h-4 bg-slate-200 mx-0.5" />
+                    </>
+                  )}
+                  <button
+                    id="close-list-receipt-preview-btn"
+                    type="button"
+                    onClick={() => setPreviewingBill(null)}
+                    className="p-1 hover:bg-slate-200 text-slate-400 hover:text-slate-600 rounded-lg transition"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
               <div 
                 className="flex-1 bg-slate-100 p-4 pb-16 flex items-center justify-center overflow-hidden relative"
-
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUpOrLeave}
                 onMouseLeave={handleMouseUpOrLeave}
               >
+                {/* Side navigation arrows overlaid on the image area */}
+                {previewBills.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => navigatePreview(-1)}
+                      disabled={loadingBillId !== null}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 z-20 p-2.5 bg-white/90 backdrop-blur-sm hover:bg-white text-slate-700 hover:text-indigo-600 rounded-2xl border border-slate-200/80 shadow-lg transition cursor-pointer disabled:opacity-40"
+                      title="Previous bill"
+                    >
+                      <ChevronLeft className="h-5 w-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigatePreview(1)}
+                      disabled={loadingBillId !== null}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 z-20 p-2.5 bg-white/90 backdrop-blur-sm hover:bg-white text-slate-700 hover:text-indigo-600 rounded-2xl border border-slate-200/80 shadow-lg transition cursor-pointer disabled:opacity-40"
+                      title="Next bill"
+                    >
+                      <ChevronRight className="h-5 w-5" />
+                    </button>
+                  </>
+                )}
+                {/* Loading overlay while fetching next/prev bill */}
+                {loadingBillId !== null && (
+                  <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-100/70 backdrop-blur-sm">
+                    <RefreshCw className="h-8 w-8 animate-spin text-indigo-600" />
+                  </div>
+                )}
                 {previewingBill.fileType.includes("pdf") ? (
                   <iframe
                     src={previewingBill.fileData}

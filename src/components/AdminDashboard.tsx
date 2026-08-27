@@ -897,66 +897,66 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
         {/* KPI 1 */}
         <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-          <div className="flex items-center gap-2 text-slate-400">
-            <Users className="h-4 w-4 text-indigo-600" />
-            <span className="text-[9px] uppercase font-bold tracking-wider">Staff Count</span>
+          <div className="flex items-start gap-2 text-slate-400">
+            <Users className="h-4 w-4 text-indigo-600 flex-shrink-0 mt-0.5" />
+            <span className="text-[9px] uppercase font-bold tracking-wider leading-tight break-words min-w-0">Staff Count</span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono">{totalEmployees}</span>
+          <span className="block text-lg font-black text-slate-800 mt-2 font-mono truncate">{totalEmployees}</span>
         </div>
 
         {/* KPI 2 */}
         <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-          <div className="flex items-center gap-2 text-slate-400">
-            <FileCheck className="h-4 w-4 text-emerald-600" />
-            <span className="text-[9px] uppercase font-bold tracking-wider">
+          <div className="flex items-start gap-2 text-slate-400">
+            <FileCheck className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+            <span className="text-[9px] uppercase font-bold tracking-wider leading-tight break-words min-w-0">
               {isAllTime ? "Claims (All Time)" : `Claims (${selectedMonthName})`}
             </span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono">{totalClaims}</span>
+          <span className="block text-lg font-black text-slate-800 mt-2 font-mono truncate">{totalClaims}</span>
         </div>
 
         {/* KPI 3 */}
         <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-          <div className="flex items-center gap-2 text-slate-400">
-            <Coins className="h-4 w-4 text-purple-600" />
-            <span className="text-[9px] uppercase font-bold tracking-wider">
-              {isAllTime ? "Approved (Selected Month)" : `Approved (${selectedMonthName})`}
+          <div className="flex items-start gap-2 text-slate-400">
+            <Coins className="h-4 w-4 text-purple-600 flex-shrink-0 mt-0.5" />
+            <span className="text-[9px] uppercase font-bold tracking-wider leading-tight break-words min-w-0">
+              {isAllTime ? "Approved" : `Approved (${selectedMonthName})`}
             </span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono">₹{totalApprovedAmount.toFixed(2)}</span>
+          <span className="block text-lg font-black text-slate-800 mt-2 font-mono truncate">₹{totalApprovedAmount.toFixed(2)}</span>
         </div>
 
         {/* KPI 4 */}
         <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-          <div className="flex items-center gap-2 text-slate-400">
-            <ShieldAlert className="h-4 w-4 text-amber-600" />
-            <span className="text-[9px] uppercase font-bold tracking-wider">
-              {isAllTime ? "Pending Audit" : `Pending (${selectedMonthName})`}
+          <div className="flex items-start gap-2 text-slate-400">
+            <ShieldAlert className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <span className="text-[9px] uppercase font-bold tracking-wider leading-tight break-words min-w-0">
+              {isAllTime ? "Pending" : `Pending (${selectedMonthName})`}
             </span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono">{pendingClaimsCount}</span>
+          <span className="block text-lg font-black text-slate-800 mt-2 font-mono truncate">{pendingClaimsCount}</span>
         </div>
 
         {/* KPI 5 */}
         <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-          <div className="flex items-center gap-2 text-slate-400">
-            <FileMinus className="h-4 w-4 text-rose-600" />
-            <span className="text-[9px] uppercase font-bold tracking-wider">
-              {isAllTime ? "Rejected (All Time)" : `Rejected (${selectedMonthName})`}
+          <div className="flex items-start gap-2 text-slate-400">
+            <FileMinus className="h-4 w-4 text-rose-600 flex-shrink-0 mt-0.5" />
+            <span className="text-[9px] uppercase font-bold tracking-wider leading-tight break-words min-w-0">
+              {isAllTime ? "Rejected" : `Rejected (${selectedMonthName})`}
             </span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono">₹{totalRejectedAmount.toFixed(2)}</span>
+          <span className="block text-lg font-black text-slate-800 mt-2 font-mono truncate">₹{totalRejectedAmount.toFixed(2)}</span>
         </div>
 
         {/* KPI 6 */}
         <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-          <div className="flex items-center gap-2 text-slate-400">
-            <TrendingUp className="h-4 w-4 text-teal-600" />
-            <span className="text-[9px] uppercase font-bold tracking-wider">
-              {isAllTime ? "Total Spent (All Time)" : `Spent (${selectedMonthName})`}
+          <div className="flex items-start gap-2 text-slate-400">
+            <TrendingUp className="h-4 w-4 text-teal-600 flex-shrink-0 mt-0.5" />
+            <span className="text-[9px] uppercase font-bold tracking-wider leading-tight break-words min-w-0">
+              {isAllTime ? "Total Spent" : `Spent (${selectedMonthName})`}
             </span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono">₹{selectedMonthSpending.toFixed(2)}</span>
+          <span className="block text-lg font-black text-slate-800 mt-2 font-mono truncate">₹{selectedMonthSpending.toFixed(2)}</span>
         </div>
       </div>
 
@@ -969,7 +969,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
             <div>
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5 text-indigo-600 shrink-0" />
-                <h3 id="employee-monthly-expenses-single-line-heading" className="text-base font-extrabold text-indigo-950 font-sans tracking-tight whitespace-nowrap">
+                <h3 id="employee-monthly-expenses-single-line-heading" className="text-base font-extrabold text-indigo-950 font-sans tracking-tight">
                   Employee Monthly Expenses ({isAllTime ? "All Time" : `${selectedMonthName} ${selectedYear}`})
                 </h3>
               </div>
