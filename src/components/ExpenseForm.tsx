@@ -212,7 +212,16 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
     try {
       const results = await Promise.all(
         fileArray.map(async (file) => {
-          const fileType = file.type || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf" : "image/jpeg");
+          // Robustly determine MIME type from both file.type and filename extension
+          const lowerName = file.name.toLowerCase();
+          let fileType = file.type;
+          if (!fileType) {
+            if (lowerName.endsWith(".pdf")) fileType = "application/pdf";
+            else if (lowerName.endsWith(".png")) fileType = "image/png";
+            else if (lowerName.endsWith(".webp")) fileType = "image/webp";
+            else if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) fileType = "image/jpeg";
+            else fileType = "image/jpeg"; // safe default for unrecognised image types
+          }
 
           if (file.size > 10 * 1024 * 1024) {
             return { error: `File "${file.name}" exceeds 10MB limit.` };

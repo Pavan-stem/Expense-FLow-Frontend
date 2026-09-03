@@ -997,7 +997,7 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
             {/* Modal Footer */}
             <div className="px-6 py-3 border-t border-slate-100 flex items-center justify-between bg-slate-50 text-xs">
               <span className="text-slate-500">
-                Vendor: <strong className="text-slate-700">{previewingBill.vendor}</strong> | Amount: <strong className="text-emerald-600">₹{previewingBill.amount}</strong>
+                Paid to: <strong className="text-slate-700">{previewingBill.vendor}</strong> | Amount: <strong className="text-emerald-600">₹{previewingBill.amount}</strong>
               </span>
 
               {previewingBill.fileData && (

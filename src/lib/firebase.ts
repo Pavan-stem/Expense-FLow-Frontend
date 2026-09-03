@@ -133,6 +133,25 @@ export const PREDEFINED_CATEGORIES = [
 ];
 
 /**
+ * Check if a payment method corresponds to SW Payment (company paid directly).
+ * SW Payments are not out-of-pocket expenses and should never be reimbursed to the employee.
+ */
+export function isSwPaymentMethod(method?: string): boolean {
+  if (!method) return false;
+  const m = method.trim();
+  if (m.includes("SW Payment")) return true;
+  if (m === "Bank Transfer" || m === "Credit Card") return true;
+  return false;
+}
+
+/**
+ * Check if a payment method corresponds to Personal Payment (paid by employee out-of-pocket).
+ */
+export function isPersonalPaymentMethod(method?: string): boolean {
+  return !isSwPaymentMethod(method);
+}
+
+/**
  * Initialize collection templates and pre-populate if needed.
  * This runs on app startup.
  */
@@ -560,22 +579,41 @@ export async function saveBillChunks(expenseId: string, billId: string, fileData
 
 export async function getBillData(expenseId: string, billId: string): Promise<string> {
   try {
-    // Check if there are chunks in the bill_chunks collection
+    // Strategy 1: Direct chunk ID lookup (fastest — no index needed)
+    // Chunks are saved with predictable IDs: chunk_${billId}_${i}
+    // Try fetching chunk_0 to discover totalChunks, then load the rest
+    const chunk0Ref = doc(db, "bill_chunks", `chunk_${billId}_0`);
+    const chunk0Snap = await getDoc(chunk0Ref);
+    if (chunk0Snap.exists()) {
+      const chunk0Data = chunk0Snap.data();
+      const totalChunks: number = chunk0Data.totalChunks || 1;
+      if (totalChunks === 1) {
+        return chunk0Data.chunkData as string;
+      }
+      // Fetch remaining chunks in parallel
+      const remainingRefs = Array.from({ length: totalChunks - 1 }, (_, i) =>
+        getDoc(doc(db, "bill_chunks", `chunk_${billId}_${i + 1}`))
+      );
+      const remainingSnaps = await Promise.all(remainingRefs);
+      const allChunks = [chunk0Data, ...remainingSnaps.map(s => s.data())].filter(Boolean);
+      allChunks.sort((a, b) => (a!.chunkIndex as number) - (b!.chunkIndex as number));
+      return allChunks.map(c => c!.chunkData as string).join("");
+    }
+
+    // Strategy 2: Query by billId only (no orderBy — avoids composite index requirement)
     const q = query(
       collection(db, "bill_chunks"),
-      where("billId", "==", billId),
-      orderBy("chunkIndex", "asc")
+      where("billId", "==", billId)
     );
     const snap = await getDocs(q);
     if (!snap.empty) {
-      // Reconstitute from chunks
+      // Sort client-side — no Firestore composite index needed
       const chunks = snap.docs.map(d => d.data());
-      // Re-sort locally to guarantee absolute order accuracy
-      chunks.sort((a, b) => a.chunkIndex - b.chunkIndex);
-      return chunks.map(c => c.chunkData).join("");
+      chunks.sort((a, b) => (a.chunkIndex as number) - (b.chunkIndex as number));
+      return chunks.map(c => c.chunkData as string).join("");
     }
 
-    // Fallback: check if the expense document itself has it (legacy offline/inline receipts)
+    // Strategy 3: Fallback for legacy expenses where fileData was stored inline
     const expDoc = await getDoc(doc(db, "expenses", expenseId));
     if (expDoc.exists()) {
       const exp = expDoc.data() as Expense;
@@ -587,6 +625,21 @@ export async function getBillData(expenseId: string, billId: string): Promise<st
     return "";
   } catch (error) {
     console.error("Error loading bill data:", error);
+    // Last-resort fallback: try querying without orderBy in case of index error
+    try {
+      const q = query(
+        collection(db, "bill_chunks"),
+        where("billId", "==", billId)
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const chunks = snap.docs.map(d => d.data());
+        chunks.sort((a, b) => (a.chunkIndex as number) - (b.chunkIndex as number));
+        return chunks.map(c => c.chunkData as string).join("");
+      }
+    } catch (fallbackError) {
+      console.error("Fallback bill data load also failed:", fallbackError);
+    }
     return "";
   }
 }
@@ -1291,7 +1344,8 @@ export async function markEmployeeExpensesAsReimbursed(
     const snap = await getDocs(q);
     const eligibleDocs = snap.docs.filter(d => {
       const data = d.data() as Expense;
-      return data.status === "approved" || data.status === "pending" || data.status === "under_review";
+      const isPersonal = isPersonalPaymentMethod(data.paymentMethod);
+      return isPersonal && data.status === "approved";
     });
 
     if (eligibleDocs.length === 0) return 0;
@@ -1305,7 +1359,7 @@ export async function markEmployeeExpensesAsReimbursed(
       adminUserId,
       adminName,
       "Mark Reimbursed",
-      `Reimbursed ${eligibleDocs.length} claim(s) for employee ID ${employeeId}`
+      `Reimbursed ${eligibleDocs.length} personal claim(s) for employee ID ${employeeId}`
     );
 
     return eligibleDocs.length;
@@ -1323,7 +1377,8 @@ export async function markAllEmployeesExpensesAsReimbursed(
     const snap = await getDocs(collection(db, "expenses"));
     const eligibleDocs = snap.docs.filter(d => {
       const data = d.data() as Expense;
-      return data.status === "approved" || data.status === "pending" || data.status === "under_review";
+      const isPersonal = isPersonalPaymentMethod(data.paymentMethod);
+      return isPersonal && data.status === "approved";
     });
 
     if (eligibleDocs.length === 0) return 0;
@@ -1337,12 +1392,81 @@ export async function markAllEmployeesExpensesAsReimbursed(
       adminUserId,
       adminName,
       "Mark All Reimbursed",
-      `Reimbursed ${eligibleDocs.length} claim(s) across all employees`
+      `Reimbursed ${eligibleDocs.length} personal claim(s) across all employees`
     );
 
     return eligibleDocs.length;
   } catch (error) {
     console.error("Error marking all expenses as reimbursed:", error);
+    throw error;
+  }
+}
+
+export async function unmarkEmployeeExpensesAsReimbursed(
+  employeeId: string,
+  adminUserId: string,
+  adminName: string
+): Promise<number> {
+  try {
+    const q = query(
+      collection(db, "expenses"),
+      where("employeeId", "==", employeeId)
+    );
+    const snap = await getDocs(q);
+    const eligibleDocs = snap.docs.filter(d => {
+      const data = d.data() as Expense;
+      return data.status === "reimbursed";
+    });
+
+    if (eligibleDocs.length === 0) return 0;
+
+    const updatePromises = eligibleDocs.map(d =>
+      updateDoc(doc(db, "expenses", d.id), { status: "approved" })
+    );
+    await Promise.all(updatePromises);
+
+    await logActivity(
+      adminUserId,
+      adminName,
+      "Reverse Reimbursed",
+      `Reversed ${eligibleDocs.length} reimbursed claim(s) back to approved for employee ID ${employeeId}`
+    );
+
+    return eligibleDocs.length;
+  } catch (error) {
+    console.error("Error reversing reimbursed expenses:", error);
+    throw error;
+  }
+}
+
+export async function unmarkAllEmployeesExpensesAsReimbursed(
+  adminUserId: string,
+  adminName: string
+): Promise<number> {
+  try {
+    const snap = await getDocs(collection(db, "expenses"));
+    const eligibleDocs = snap.docs.filter(d => {
+      const data = d.data() as Expense;
+      return data.status === "reimbursed";
+    });
+
+    if (eligibleDocs.length === 0) return 0;
+
+    const updatePromises = eligibleDocs.map(d =>
+      updateDoc(doc(db, "expenses", d.id), { status: "approved" })
+    );
+    await Promise.all(updatePromises);
+
+    await logActivity(
+      adminUserId,
+      adminName,
+      "Reverse All Reimbursed",
+      `Reversed ${eligibleDocs.length} reimbursed claim(s) back to approved across all employees`
+    );
+
+    return eligibleDocs.length;
+  } catch (error) {
+    console.error("Error reversing all reimbursed expenses:", error);
     throw error;
   }
 }

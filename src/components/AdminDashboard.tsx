@@ -10,6 +10,8 @@ import {
   toggleEmployeeAccountStatus,
   markEmployeeExpensesAsReimbursed,
   markAllEmployeesExpensesAsReimbursed,
+  unmarkEmployeeExpensesAsReimbursed,
+  unmarkAllEmployeesExpensesAsReimbursed,
   getBillData,
   updateExpense,
   deleteExpense,
@@ -20,7 +22,9 @@ import {
   type EmployeeProfile, 
   type Expense, 
   type ExpenseCategory,
-  type VoucherComment
+  type VoucherComment,
+  isSwPaymentMethod,
+  isPersonalPaymentMethod
 } from "../lib/firebase";
 import { 
   collectBillItems, 
@@ -523,10 +527,16 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
     try {
       const count = await markEmployeeExpensesAsReimbursed(employeeId, user.employeeId, user.name);
       if (count > 0) {
-        showToast("success", `Successfully marked ${count} approved claim(s) as REIMBURSED for ${employeeName}!`);
-        setExpenses(prev => prev.map(e => e.employeeId === employeeId && e.status === "approved" ? { ...e, status: "reimbursed" } : e));
+        showToast("success", `Successfully marked ${count} approved personal claim(s) as REIMBURSED for ${employeeName}!`);
+        setExpenses(prev => prev.map(e => 
+          e.employeeId === employeeId && 
+          e.status === "approved" && 
+          isPersonalPaymentMethod(e.paymentMethod) 
+            ? { ...e, status: "reimbursed" } 
+            : e
+        ));
       } else {
-        showToast("error", `No pending approved claims found to reimburse for ${employeeName}.`);
+        showToast("error", `No pending approved personal claims found to reimburse for ${employeeName}.`);
       }
     } catch (err: any) {
       showToast("error", err.message || "Failed to mark claims as reimbursed.");
@@ -537,13 +547,54 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
     try {
       const count = await markAllEmployeesExpensesAsReimbursed(user.employeeId, user.name);
       if (count > 0) {
-        showToast("success", `Successfully marked ${count} claim(s) as REIMBURSED across all employees!`);
-        setExpenses(prev => prev.map(e => (e.status === "approved" || e.status === "pending" || e.status === "under_review") ? { ...e, status: "reimbursed" } : e));
+        showToast("success", `Successfully marked ${count} personal claim(s) as REIMBURSED across all employees!`);
+        setExpenses(prev => prev.map(e => 
+          e.status === "approved" && 
+          isPersonalPaymentMethod(e.paymentMethod) 
+            ? { ...e, status: "reimbursed" } 
+            : e
+        ));
       } else {
-        showToast("error", `No pending or approved claims found to reimburse.`);
+        showToast("error", `No pending approved personal claims found to reimburse.`);
       }
     } catch (err: any) {
-      showToast("error", err.message || "Failed to mark all claims as reimbursed.");
+      showToast("error", err.message || "Failed to mark all personal claims as reimbursed.");
+    }
+  };
+
+  const handleReverseReimbursement = async (employeeId: string, employeeName: string) => {
+    try {
+      const count = await unmarkEmployeeExpensesAsReimbursed(employeeId, user.employeeId, user.name);
+      if (count > 0) {
+        showToast("success", `Reversed ${count} claim(s) back to APPROVED for ${employeeName}.`);
+        setExpenses(prev => prev.map(e => 
+          e.employeeId === employeeId && e.status === "reimbursed"
+            ? { ...e, status: "approved" } 
+            : e
+        ));
+      } else {
+        showToast("error", `No reimbursed claims found to reverse for ${employeeName}.`);
+      }
+    } catch (err: any) {
+      showToast("error", err.message || "Failed to reverse claims.");
+    }
+  };
+
+  const handleReverseAllReimbursed = async () => {
+    try {
+      const count = await unmarkAllEmployeesExpensesAsReimbursed(user.employeeId, user.name);
+      if (count > 0) {
+        showToast("success", `Reversed ${count} claim(s) back to APPROVED across all employees.`);
+        setExpenses(prev => prev.map(e => 
+          e.status === "reimbursed"
+            ? { ...e, status: "approved" } 
+            : e
+        ));
+      } else {
+        showToast("error", `No reimbursed claims found to reverse.`);
+      }
+    } catch (err: any) {
+      showToast("error", err.message || "Failed to reverse all claims.");
     }
   };
 
@@ -667,6 +718,16 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         pendingAmount: number;
         rejectedAmount: number;
         claimsCount: number;
+        // Personal vs SW Payment breakdown
+        personalTotalAmount: number;
+        personalApprovedAmount: number;
+        personalReimbursedAmount: number;
+        personalPendingAmount: number;
+        personalReimbursableAmount: number;
+        swTotalAmount: number;
+        swApprovedAmount: number;
+        swReimbursedAmount: number;
+        swPendingAmount: number;
       };
     } = {};
 
@@ -686,7 +747,16 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         reimbursedAmount: 0,
         pendingAmount: 0,
         rejectedAmount: 0,
-        claimsCount: 0
+        claimsCount: 0,
+        personalTotalAmount: 0,
+        personalApprovedAmount: 0,
+        personalReimbursedAmount: 0,
+        personalPendingAmount: 0,
+        personalReimbursableAmount: 0,
+        swTotalAmount: 0,
+        swApprovedAmount: 0,
+        swReimbursedAmount: 0,
+        swPendingAmount: 0
       };
     });
 
@@ -716,26 +786,70 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
           reimbursedAmount: 0,
           pendingAmount: 0,
           rejectedAmount: 0,
-          claimsCount: 0
+          claimsCount: 0,
+          personalTotalAmount: 0,
+          personalApprovedAmount: 0,
+          personalReimbursedAmount: 0,
+          personalPendingAmount: 0,
+          personalReimbursableAmount: 0,
+          swTotalAmount: 0,
+          swApprovedAmount: 0,
+          swReimbursedAmount: 0,
+          swPendingAmount: 0
         };
       }
 
       const amt = exp.totalAmount || exp.amount || 0;
       empMap[key].claimsCount += 1;
 
-      // Only ACCEPTED / APPROVED / REIMBURSED claims add to totalAmount (SUM of Amount)
-      if (exp.status === "reimbursed") {
-        empMap[key].reimbursedAmount += amt;
-        empMap[key].approvedAmount += amt;
-        empMap[key].totalAmount += amt;
-      } else if (exp.status === "approved") {
-        empMap[key].approvedAmount += amt;
-        empMap[key].totalAmount += amt;
-      } else if (exp.status === "pending" || exp.status === "under_review") {
-        empMap[key].pendingAmount += amt;
-      } else if (exp.status === "rejected") {
-        empMap[key].rejectedAmount += amt;
+      const isSw = isSwPaymentMethod(exp.paymentMethod);
+
+      if (!isSw) {
+        // Personal Payment: Employee paid out-of-pocket, eligible for reimbursement
+        if (exp.status === "reimbursed") {
+          empMap[key].reimbursedAmount += amt;
+          empMap[key].personalReimbursedAmount += amt;
+          empMap[key].personalApprovedAmount += amt;
+          empMap[key].personalTotalAmount += amt;
+          empMap[key].approvedAmount += amt;
+          empMap[key].totalAmount += amt;
+        } else if (exp.status === "approved") {
+          empMap[key].personalApprovedAmount += amt;
+          empMap[key].personalTotalAmount += amt;
+          empMap[key].approvedAmount += amt;
+          empMap[key].totalAmount += amt;
+        } else if (exp.status === "pending" || exp.status === "under_review") {
+          empMap[key].personalPendingAmount += amt;
+          empMap[key].pendingAmount += amt;
+        } else if (exp.status === "rejected") {
+          empMap[key].rejectedAmount += amt;
+        }
+      } else {
+        // SW Payment: Paid directly by company, NEVER reimbursed to employee
+        if (exp.status === "reimbursed") {
+          empMap[key].swReimbursedAmount += amt;
+          empMap[key].swApprovedAmount += amt;
+          empMap[key].swTotalAmount += amt;
+          empMap[key].approvedAmount += amt;
+          empMap[key].totalAmount += amt;
+          // Note: reimbursedAmount column strictly tracks employee personal reimbursements
+        } else if (exp.status === "approved") {
+          empMap[key].swApprovedAmount += amt;
+          empMap[key].swTotalAmount += amt;
+          empMap[key].approvedAmount += amt;
+          empMap[key].totalAmount += amt;
+        } else if (exp.status === "pending" || exp.status === "under_review") {
+          empMap[key].swPendingAmount += amt;
+          empMap[key].pendingAmount += amt;
+        } else if (exp.status === "rejected") {
+          empMap[key].rejectedAmount += amt;
+        }
       }
+    });
+
+    // Compute personal reimbursable amount (approved personal payments not yet reimbursed)
+    Object.values(empMap).forEach(e => {
+      e.personalReimbursableAmount = Math.max(0, e.personalApprovedAmount - e.personalReimbursedAmount);
     });
 
     let list = Object.values(empMap).filter(e => e.role !== "admin");
@@ -894,69 +1008,75 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
       </div>
 
       {/* KPI Cards Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 sm:gap-4">
         {/* KPI 1 */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-          <div className="flex items-start gap-2 text-slate-400">
-            <Users className="h-4 w-4 text-indigo-600 flex-shrink-0 mt-0.5" />
-            <span className="text-[9px] uppercase font-bold tracking-wider leading-tight break-words min-w-0">Staff Count</span>
+        <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-sm min-w-0 overflow-hidden hover:shadow-md transition">
+          <div className="flex items-start gap-1.5 text-slate-400 min-w-0">
+            <Users className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-indigo-600 flex-shrink-0 mt-0.5" />
+            <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider leading-tight truncate min-w-0">Staff Count</span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono truncate">{totalEmployees}</span>
+          <span className="block text-sm sm:text-base lg:text-lg font-black text-slate-800 mt-1 sm:mt-2 font-mono tracking-tight truncate">{totalEmployees}</span>
         </div>
 
         {/* KPI 2 */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-          <div className="flex items-start gap-2 text-slate-400">
-            <FileCheck className="h-4 w-4 text-emerald-600 flex-shrink-0 mt-0.5" />
-            <span className="text-[9px] uppercase font-bold tracking-wider leading-tight break-words min-w-0">
-              {isAllTime ? "Claims (All Time)" : `Claims (${selectedMonthName})`}
+        <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-sm min-w-0 overflow-hidden hover:shadow-md transition">
+          <div className="flex items-start gap-1.5 text-slate-400 min-w-0">
+            <FileCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+            <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider leading-tight truncate min-w-0" title={isAllTime ? "Claims (All Time)" : `Claims (${selectedMonthName})`}>
+              {isAllTime ? "Claims (All)" : `Claims (${selectedMonthName})`}
             </span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono truncate">{totalClaims}</span>
+          <span className="block text-sm sm:text-base lg:text-lg font-black text-slate-800 mt-1 sm:mt-2 font-mono tracking-tight truncate">{totalClaims}</span>
         </div>
 
         {/* KPI 3 */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-          <div className="flex items-start gap-2 text-slate-400">
-            <Coins className="h-4 w-4 text-purple-600 flex-shrink-0 mt-0.5" />
-            <span className="text-[9px] uppercase font-bold tracking-wider leading-tight break-words min-w-0">
+        <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-sm min-w-0 overflow-hidden hover:shadow-md transition">
+          <div className="flex items-start gap-1.5 text-slate-400 min-w-0">
+            <Coins className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-purple-600 flex-shrink-0 mt-0.5" />
+            <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider leading-tight truncate min-w-0" title={isAllTime ? "Approved" : `Approved (${selectedMonthName})`}>
               {isAllTime ? "Approved" : `Approved (${selectedMonthName})`}
             </span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono truncate">₹{totalApprovedAmount.toFixed(2)}</span>
+          <span className="block text-sm sm:text-base lg:text-lg font-black text-slate-800 mt-1 sm:mt-2 font-mono tracking-tight truncate" title={`₹${totalApprovedAmount.toFixed(2)}`}>
+            ₹{totalApprovedAmount.toFixed(2)}
+          </span>
         </div>
 
         {/* KPI 4 */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-          <div className="flex items-start gap-2 text-slate-400">
-            <ShieldAlert className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
-            <span className="text-[9px] uppercase font-bold tracking-wider leading-tight break-words min-w-0">
+        <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-sm min-w-0 overflow-hidden hover:shadow-md transition">
+          <div className="flex items-start gap-1.5 text-slate-400 min-w-0">
+            <ShieldAlert className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider leading-tight truncate min-w-0" title={isAllTime ? "Pending" : `Pending (${selectedMonthName})`}>
               {isAllTime ? "Pending" : `Pending (${selectedMonthName})`}
             </span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono truncate">{pendingClaimsCount}</span>
+          <span className="block text-sm sm:text-base lg:text-lg font-black text-slate-800 mt-1 sm:mt-2 font-mono tracking-tight truncate">{pendingClaimsCount}</span>
         </div>
 
         {/* KPI 5 */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-          <div className="flex items-start gap-2 text-slate-400">
-            <FileMinus className="h-4 w-4 text-rose-600 flex-shrink-0 mt-0.5" />
-            <span className="text-[9px] uppercase font-bold tracking-wider leading-tight break-words min-w-0">
+        <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-sm min-w-0 overflow-hidden hover:shadow-md transition">
+          <div className="flex items-start gap-1.5 text-slate-400 min-w-0">
+            <FileMinus className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-rose-600 flex-shrink-0 mt-0.5" />
+            <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider leading-tight truncate min-w-0" title={isAllTime ? "Rejected" : `Rejected (${selectedMonthName})`}>
               {isAllTime ? "Rejected" : `Rejected (${selectedMonthName})`}
             </span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono truncate">₹{totalRejectedAmount.toFixed(2)}</span>
+          <span className="block text-sm sm:text-base lg:text-lg font-black text-slate-800 mt-1 sm:mt-2 font-mono tracking-tight truncate" title={`₹${totalRejectedAmount.toFixed(2)}`}>
+            ₹{totalRejectedAmount.toFixed(2)}
+          </span>
         </div>
 
         {/* KPI 6 */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm">
-          <div className="flex items-start gap-2 text-slate-400">
-            <TrendingUp className="h-4 w-4 text-teal-600 flex-shrink-0 mt-0.5" />
-            <span className="text-[9px] uppercase font-bold tracking-wider leading-tight break-words min-w-0">
+        <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-sm min-w-0 overflow-hidden hover:shadow-md transition">
+          <div className="flex items-start gap-1.5 text-slate-400 min-w-0">
+            <TrendingUp className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-teal-600 flex-shrink-0 mt-0.5" />
+            <span className="text-[9px] sm:text-[10px] uppercase font-bold tracking-wider leading-tight truncate min-w-0" title={isAllTime ? "Total Spent" : `Spent (${selectedMonthName})`}>
               {isAllTime ? "Total Spent" : `Spent (${selectedMonthName})`}
             </span>
           </div>
-          <span className="block text-lg font-black text-slate-800 mt-2 font-mono truncate">₹{selectedMonthSpending.toFixed(2)}</span>
+          <span className="block text-sm sm:text-base lg:text-lg font-black text-slate-800 mt-1 sm:mt-2 font-mono tracking-tight truncate" title={`₹${selectedMonthSpending.toFixed(2)}`}>
+            ₹{selectedMonthSpending.toFixed(2)}
+          </span>
         </div>
       </div>
 
@@ -1046,7 +1166,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {getEmployeeMonthlyTotals().map((empItem) => {
                     const isDeactivated = empItem.status === "deactivated";
-                    const hasApprovedUnpaid = empItem.approvedAmount > empItem.reimbursedAmount || empItem.pendingAmount > 0;
+                    const hasPersonalToReimburse = empItem.personalReimbursableAmount > 0;
                     return (
                       <tr key={empItem.id} className="hover:bg-indigo-50/20 transition">
                         <td className="py-3 px-4">
@@ -1099,20 +1219,46 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                         </td>
 
                         <td className="py-3 px-4 text-center whitespace-nowrap">
-                          <button
-                            type="button"
-                            onClick={() => handleMarkReimbursed(empItem.employeeId, empItem.name)}
-                            disabled={!hasApprovedUnpaid}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1 mx-auto cursor-pointer ${
-                              hasApprovedUnpaid
-                                ? "bg-purple-600 hover:bg-purple-700 text-white shadow-purple-600/20"
-                                : "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
-                            }`}
-                            title={hasApprovedUnpaid ? `Reimburse full total for ${empItem.name}` : "No pending claims to reimburse"}
-                          >
-                            <Coins className="h-3.5 w-3.5" />
-                            {hasApprovedUnpaid ? `Reimburse ₹${empItem.totalAmount.toFixed(0)}` : "Fully Reimbursed"}
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5 mx-auto">
+                            {hasPersonalToReimburse ? (
+                              <button
+                                type="button"
+                                onClick={() => handleMarkReimbursed(empItem.employeeId, empItem.name)}
+                                className="px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-xs flex items-center justify-center gap-1 cursor-pointer bg-purple-600 hover:bg-purple-700 text-white shadow-purple-600/20"
+                                title={`Reimburse Personal Payment (₹${empItem.personalReimbursableAmount.toFixed(0)}) for ${empItem.name}${empItem.swTotalAmount > 0 ? ` · ₹${empItem.swTotalAmount.toFixed(0)} SW Payment (Company Paid)` : ""}`}
+                              >
+                                <Coins className="h-3.5 w-3.5" />
+                                Reimburse ₹{empItem.personalReimbursableAmount.toFixed(0)}
+                              </button>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 bg-slate-100 text-slate-500 border border-slate-200">
+                                <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+                                Fully Reimbursed
+                              </span>
+                            )}
+
+                            {/* Reverse option if claims were reimbursed */}
+                            {empItem.reimbursedAmount > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleReverseReimbursement(empItem.employeeId, empItem.name)}
+                                className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 border border-rose-200 rounded-xl text-[11px] font-bold transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                                title={`Accidentally clicked reimburse? Click to reverse ₹${empItem.reimbursedAmount.toFixed(0)} back to Approved`}
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                                Reverse
+                              </button>
+                            )}
+                          </div>
+
+                          {empItem.swTotalAmount > 0 && (
+                            <span 
+                              className="block text-[9px] text-slate-400 font-normal mt-0.5" 
+                              title={`₹${empItem.swTotalAmount.toFixed(2)} paid via SW Payment (Company Paid)`}
+                            >
+                              {hasPersonalToReimburse ? `(₹${empItem.swTotalAmount.toFixed(0)} SW paid)` : "(SW Payment)"}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1125,7 +1271,8 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                     const grandApproved = totals.reduce((sum, e) => sum + e.approvedAmount, 0);
                     const grandPending = totals.reduce((sum, e) => sum + e.pendingAmount, 0);
                     const grandReimbursed = totals.reduce((sum, e) => sum + e.reimbursedAmount, 0);
-                    const hasUnreimbursed = grandTotalSpent > grandReimbursed || grandPending > 0;
+                    const grandPersonalReimbursable = totals.reduce((sum, e) => sum + e.personalReimbursableAmount, 0);
+                    const hasUnreimbursed = grandPersonalReimbursable > 0;
                     return (
                       <tr className="bg-slate-900 text-white font-bold text-xs sticky bottom-0 z-10 border-t-2 border-slate-700">
                         <td className="py-3 px-4 uppercase font-black tracking-wider text-indigo-300">
@@ -1147,20 +1294,34 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                           ₹{grandReimbursed.toFixed(2)}
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <button
-                            type="button"
-                            onClick={handleMarkAllReimbursed}
-                            disabled={!hasUnreimbursed}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition shadow-md flex items-center justify-center gap-1 mx-auto cursor-pointer ${
-                              hasUnreimbursed
-                                ? "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30"
-                                : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed"
-                            }`}
-                            title="Reimburse all employees after checking pivot table"
-                          >
-                            <CheckCircle className="h-3.5 w-3.5" />
-                            {hasUnreimbursed ? `Reimburse All (₹${grandTotalSpent.toFixed(0)})` : "All Reimbursed"}
-                          </button>
+                          <div className="flex items-center justify-center gap-2 mx-auto">
+                            <button
+                              type="button"
+                              onClick={handleMarkAllReimbursed}
+                              disabled={!hasUnreimbursed}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider transition shadow-md flex items-center justify-center gap-1 cursor-pointer ${
+                                hasUnreimbursed
+                                  ? "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/30"
+                                  : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed"
+                              }`}
+                              title={hasUnreimbursed ? `Reimburse all employees (Personal Payment only: ₹${grandPersonalReimbursable.toFixed(2)})` : "All personal claims are reimbursed"}
+                            >
+                              <CheckCircle className="h-3.5 w-3.5" />
+                              {hasUnreimbursed ? `Reimburse All (₹${grandPersonalReimbursable.toFixed(0)})` : "All Reimbursed"}
+                            </button>
+
+                            {grandReimbursed > 0 && (
+                              <button
+                                type="button"
+                                onClick={handleReverseAllReimbursed}
+                                className="px-2.5 py-1.5 bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-800/60 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-xs"
+                                title={`Accidentally reimbursed all? Click to reverse ₹${grandReimbursed.toFixed(0)} back to Approved across all employees`}
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                                Reverse All
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1404,7 +1565,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                   <p className="text-slate-800 font-semibold font-mono">{viewingVoucherDetails.date}</p>
                 </div>
                 <div>
-                  <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Vendor / Payee</span>
+                  <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Paid to</span>
                   <p className="text-slate-800 font-semibold">{viewingVoucherDetails.vendor}</p>
                 </div>
                 <div>
@@ -1661,16 +1822,32 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                   {activeActionStatus === "approved" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
                   Approve
                 </button>
-                <button
-                  id="admin-modal-reimburse-btn"
-                  type="button"
-                  onClick={() => handleAdminStatusChange(viewingVoucherDetails, "reimbursed")}
-                  disabled={adminActionLoading}
-                  className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs"
-                >
-                  {activeActionStatus === "reimbursed" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-                  Reimburse
-                </button>
+                {viewingVoucherDetails.status === "reimbursed" ? (
+                  <button
+                    id="admin-modal-reverse-btn"
+                    type="button"
+                    onClick={() => handleAdminStatusChange(viewingVoucherDetails, "approved")}
+                    disabled={adminActionLoading}
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs"
+                    title="Accidentally reimbursed? Click to reverse back to Approved status"
+                  >
+                    {activeActionStatus === "approved" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Reverse to Approved
+                  </button>
+                ) : (
+                  <button
+                    id="admin-modal-reimburse-btn"
+                    type="button"
+                    onClick={() => handleAdminStatusChange(viewingVoucherDetails, "reimbursed")}
+                    disabled={adminActionLoading}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs"
+                    title={isSwPaymentMethod(viewingVoucherDetails.paymentMethod) ? "Mark SW Payment as paid by company" : "Mark as reimbursed to employee"}
+                  >
+                    {activeActionStatus === "reimbursed" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+                    {isSwPaymentMethod(viewingVoucherDetails.paymentMethod) ? "Mark Paid" : "Reimburse"}
+                  </button>
+                )}
                 <button
                   id="close-voucher-modal-footer-btn"
                   onClick={() => setViewingVoucherDetails(null)}

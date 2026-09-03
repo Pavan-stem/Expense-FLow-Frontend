@@ -18,7 +18,8 @@ import {
   type Expense, 
   type ExpenseCategory,
   type BillFile,
-  type VoucherComment
+  type VoucherComment,
+  isSwPaymentMethod
 } from "../lib/firebase";
 import { 
   collectBillItems, 
@@ -948,7 +949,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                   <th className="py-4 px-4 font-sans">Voucher No.</th>
                   {user.role === "admin" && <th className="py-4 px-4 font-sans">Employee</th>}
                   <th className="py-4 px-4 font-sans">Type of Expense</th>
-                  <th className="py-4 px-4 font-sans">Vendor</th>
+                  <th className="py-4 px-4 font-sans">Paid to</th>
                   <th className="py-4 px-4 font-sans">Payment Method</th>
                   <th className="py-4 px-4 text-right font-sans">Total Claim</th>
                   <th className="py-4 px-4 text-center font-sans">Status</th>
@@ -1155,7 +1156,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                   <div className="border border-slate-100 p-4 rounded-xl space-y-2.5">
                     <h4 className="text-[10px] uppercase font-bold text-indigo-600 tracking-wider">Operational details</h4>
                     <div className="space-y-1.5 text-xs text-slate-600">
-                      <div><span className="font-semibold text-slate-400">Vendor:</span> {selectedExpense.vendor}</div>
+                      <div><span className="font-semibold text-slate-400">Paid to:</span> {selectedExpense.vendor}</div>
                       <div>
                         <span className="font-semibold text-slate-400">Payment:</span>{" "}
                         <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold ${
@@ -1428,15 +1429,30 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                       {activeActionStatus === "approved" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
                       Approve Claim
                     </button>
-                    <button
-                      id="admin-reimburse-claim"
-                      onClick={() => handleStatusChange(selectedExpense, "reimbursed")}
-                      disabled={adminActionLoading}
-                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-xs font-semibold text-white rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-sm"
-                    >
-                      {activeActionStatus === "reimbursed" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-                      Mark Reimbursed
-                    </button>
+                    {selectedExpense.status === "reimbursed" ? (
+                      <button
+                        id="admin-reverse-claim"
+                        onClick={() => handleStatusChange(selectedExpense, "approved")}
+                        disabled={adminActionLoading}
+                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-xs font-semibold text-white rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                        title="Accidentally marked reimbursed? Click to reverse back to Approved status"
+                      >
+                        {activeActionStatus === "approved" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        Reverse to Approved
+                      </button>
+                    ) : (
+                      <button
+                        id="admin-reimburse-claim"
+                        onClick={() => handleStatusChange(selectedExpense, "reimbursed")}
+                        disabled={adminActionLoading}
+                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-xs font-semibold text-white rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                        title={isSwPaymentMethod(selectedExpense.paymentMethod) ? "Mark SW Payment as paid by company" : "Mark claim as reimbursed to employee"}
+                      >
+                        {activeActionStatus === "reimbursed" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
+                        {isSwPaymentMethod(selectedExpense.paymentMethod) ? "Mark Paid" : "Mark Reimbursed"}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -1546,7 +1562,8 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                     <RefreshCw className="h-8 w-8 animate-spin text-indigo-600" />
                   </div>
                 )}
-                {previewingBill.fileType.includes("pdf") ? (
+                {/* Determine rendering mode: pdf or image */}
+                {(previewingBill.fileType.includes("pdf") || previewingBill.fileName.toLowerCase().endsWith(".pdf")) ? (
                   <iframe
                     src={previewingBill.fileData}
                     className="w-full h-full border-0 rounded-xl bg-white"
@@ -1556,11 +1573,26 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                   <>
                     <div className="w-full h-full flex items-center justify-center overflow-hidden select-none">
                       <img
-                        src={previewingBill.fileData}
+                        src={previewingBill.fileData || undefined}
                         alt={previewingBill.fileName}
                         referrerPolicy="no-referrer"
                         draggable={false}
                         onDragStart={(e) => e.preventDefault()}
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          target.style.display = "none";
+                          const parent = target.parentElement;
+                          if (parent && !parent.querySelector(".img-error-msg")) {
+                            const errDiv = document.createElement("div");
+                            errDiv.className = "img-error-msg flex flex-col items-center gap-3 text-slate-500";
+                            errDiv.innerHTML = `
+                              <svg xmlns='http://www.w3.org/2000/svg' class='h-12 w-12 text-slate-300' fill='none' viewBox='0 0 24 24' stroke='currentColor'><path stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z' /></svg>
+                              <p class='text-sm font-semibold text-slate-600'>Image could not be displayed</p>
+                              <p class='text-xs text-slate-400'>The file may still be intact — try downloading it</p>
+                            `;
+                            parent.appendChild(errDiv);
+                          }
+                        }}
                         className={`max-w-full max-h-full object-contain rounded-xl shadow-md transition-transform duration-75 ease-out select-none ${zoomScale > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}
                         style={{
                           transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomScale}) rotate(${rotateAngle}deg)`

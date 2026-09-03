@@ -257,56 +257,73 @@ export default function EmployeeDashboard({ user, onNavigateToSubmit, onNavigate
       </div>
 
       {/* Metrics Row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Metrics Row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         {/* Metric 1 */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm flex items-center gap-4">
-          <span className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
-            <IndianRupee className="h-5 w-5" />
-          </span>
-          <div>
-            <span className="block text-[10px] uppercase font-bold text-slate-400">
-              {isAllTime ? "Total Spent (All Time)" : `Spent (${selectedMonthName})`}
+        <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-sm flex flex-col justify-between min-w-0 overflow-hidden hover:shadow-md transition">
+          <div className="flex items-center justify-between gap-1.5 mb-2 min-w-0">
+            <span className="text-[10px] sm:text-xs uppercase font-bold text-slate-400 tracking-wider truncate" title={isAllTime ? "Total Spent (All Time)" : `Spent (${selectedMonthName})`}>
+              {isAllTime ? "Total Spent" : `Spent (${selectedMonthName})`}
             </span>
-            <span id="dash-month-total" className="block text-base font-black text-slate-800 font-mono">₹{(isAllTime ? activeExpenses.reduce((s, e) => s + e.totalAmount, 0) : totalSelectedMonthSpent).toFixed(2)}</span>
+            <span className="p-1.5 sm:p-2 bg-indigo-50 text-indigo-600 rounded-xl shrink-0">
+              <IndianRupee className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </span>
+          </div>
+          <div className="min-w-0">
+            <span id="dash-month-total" className="block text-sm sm:text-base lg:text-lg font-black text-slate-900 font-mono tracking-tight truncate" title={`₹${(isAllTime ? activeExpenses.reduce((s, e) => s + e.totalAmount, 0) : totalSelectedMonthSpent).toFixed(2)}`}>
+              ₹{(isAllTime ? activeExpenses.reduce((s, e) => s + e.totalAmount, 0) : totalSelectedMonthSpent).toFixed(2)}
+            </span>
           </div>
         </div>
 
         {/* Metric 2 */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm flex items-center gap-4">
-          <span className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
-            <CheckCircle2 className="h-5 w-5" />
-          </span>
-          <div>
-            <span className="block text-[10px] uppercase font-bold text-slate-400">
-              {isAllTime ? "Approved (Selected Month)" : `Total Approved (${selectedMonthName})`}
+        <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-sm flex flex-col justify-between min-w-0 overflow-hidden hover:shadow-md transition">
+          <div className="flex items-center justify-between gap-1.5 mb-2 min-w-0">
+            <span className="text-[10px] sm:text-xs uppercase font-bold text-slate-400 tracking-wider truncate" title={isAllTime ? "Approved (Selected Month)" : `Approved (${selectedMonthName})`}>
+              {isAllTime ? "Total Approved" : `Approved (${selectedMonthName})`}
             </span>
-            <span id="dash-approved-total" className="block text-base font-black text-slate-800 font-mono">₹{approvedAmount.toFixed(2)}</span>
+            <span className="p-1.5 sm:p-2 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
+              <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </span>
+          </div>
+          <div className="min-w-0">
+            <span id="dash-approved-total" className="block text-sm sm:text-base lg:text-lg font-black text-slate-900 font-mono tracking-tight truncate" title={`₹${approvedAmount.toFixed(2)}`}>
+              ₹{approvedAmount.toFixed(2)}
+            </span>
           </div>
         </div>
 
         {/* Metric 3 */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm flex items-center gap-4">
-          <span className="p-3 bg-amber-50 text-amber-600 rounded-xl">
-            <Clock className="h-5 w-5" />
-          </span>
-          <div>
-            <span className="block text-[10px] uppercase font-bold text-slate-400">
-              {isAllTime ? "Pending Approvals" : `Pending (${selectedMonthName})`}
+        <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-sm flex flex-col justify-between min-w-0 overflow-hidden hover:shadow-md transition">
+          <div className="flex items-center justify-between gap-1.5 mb-2 min-w-0">
+            <span className="text-[10px] sm:text-xs uppercase font-bold text-slate-400 tracking-wider truncate" title={isAllTime ? "Pending Approvals" : `Pending (${selectedMonthName})`}>
+              {isAllTime ? "Pending" : `Pending (${selectedMonthName})`}
             </span>
-            <span id="dash-pending-total" className="block text-base font-black text-slate-800 font-mono">₹{pendingAmount.toFixed(2)}</span>
+            <span className="p-1.5 sm:p-2 bg-amber-50 text-amber-600 rounded-xl shrink-0">
+              <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </span>
+          </div>
+          <div className="min-w-0">
+            <span id="dash-pending-total" className="block text-sm sm:text-base lg:text-lg font-black text-slate-900 font-mono tracking-tight truncate" title={`₹${pendingAmount.toFixed(2)}`}>
+              ₹{pendingAmount.toFixed(2)}
+            </span>
           </div>
         </div>
 
         {/* Metric 4 */}
-        <div className="bg-white rounded-2xl border border-slate-100 p-4 shadow-sm flex items-center gap-4">
-          <span className="p-3 bg-purple-50 text-purple-600 rounded-xl">
-            <TrendingUp className="h-5 w-5" />
-          </span>
-          <div>
-            <span className="block text-[10px] uppercase font-bold text-slate-400">
+        <div className="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 shadow-sm flex flex-col justify-between min-w-0 overflow-hidden hover:shadow-md transition">
+          <div className="flex items-center justify-between gap-1.5 mb-2 min-w-0">
+            <span className="text-[10px] sm:text-xs uppercase font-bold text-slate-400 tracking-wider truncate" title={isAllTime ? "Reimbursed" : `Reimbursed (${selectedMonthName})`}>
               {isAllTime ? "Reimbursed" : `Reimbursed (${selectedMonthName})`}
             </span>
-            <span id="dash-reimbursed-total" className="block text-base font-black text-slate-800 font-mono">₹{reimbursedAmount.toFixed(2)}</span>
+            <span className="p-1.5 sm:p-2 bg-purple-50 text-purple-600 rounded-xl shrink-0">
+              <TrendingUp className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            </span>
+          </div>
+          <div className="min-w-0">
+            <span id="dash-reimbursed-total" className="block text-sm sm:text-base lg:text-lg font-black text-slate-900 font-mono tracking-tight truncate" title={`₹${reimbursedAmount.toFixed(2)}`}>
+              ₹{reimbursedAmount.toFixed(2)}
+            </span>
           </div>
         </div>
       </div>
