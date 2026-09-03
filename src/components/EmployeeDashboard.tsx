@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { 
   getExpensesByEmployee, 
+  subscribeToAdvances,
+  calculateAdvanceSummary,
   type EmployeeProfile, 
   type Expense 
 } from "../lib/firebase";
@@ -11,7 +13,8 @@ import {
   TrendingUp, 
   Receipt, 
   AlertCircle,
-  Calendar 
+  Calendar,
+  Wallet
 } from "lucide-react";
 import { 
   ResponsiveContainer, 
@@ -32,12 +35,19 @@ interface EmployeeDashboardProps {
   user: EmployeeProfile;
   onNavigateToSubmit: () => void;
   onNavigateToExpenses: () => void;
+  onNavigateToAdvances?: () => void;
   refreshTrigger: number;
 }
 
-export default function EmployeeDashboard({ user, onNavigateToSubmit, onNavigateToExpenses, refreshTrigger }: EmployeeDashboardProps) {
+export default function EmployeeDashboard({ user, onNavigateToSubmit, onNavigateToExpenses, onNavigateToAdvances, refreshTrigger }: EmployeeDashboardProps) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
+  const [advanceSummary, setAdvanceSummary] = useState({
+    totalAdvance: 0,
+    totalUsed: 0,
+    availableBalance: 0,
+    pendingAdvanceAmount: 0
+  });
 
   useEffect(() => {
     const fetchExpenses = async () => {
@@ -52,7 +62,13 @@ export default function EmployeeDashboard({ user, onNavigateToSubmit, onNavigate
       }
     };
     fetchExpenses();
-  }, [user.employeeId, refreshTrigger]);
+
+    const unsubAdv = subscribeToAdvances((advs) => {
+      setAdvanceSummary(prev => calculateAdvanceSummary(user.employeeId, advs, expenses, user.email, user.name));
+    });
+
+    return () => unsubAdv();
+  }, [user, refreshTrigger, expenses.length]);
 
   const now = new Date();
   const currentMonthIdx = now.getMonth();
@@ -255,6 +271,40 @@ export default function EmployeeDashboard({ user, onNavigateToSubmit, onNavigate
           </button>
         </div>
       </div>
+
+      {/* Advance Wallet Summary Banner */}
+      {advanceSummary.totalAdvance > 0 && (
+        <div className="bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-900 p-4 sm:p-5 rounded-3xl text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm border border-emerald-800/40">
+          <div className="flex items-center gap-3.5">
+            <div className="p-3 bg-emerald-500/20 text-emerald-400 rounded-2xl border border-emerald-500/30">
+              <Wallet className="h-6 w-6" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] uppercase font-bold text-emerald-300 tracking-wider">Company Advance Balance</span>
+                <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-full text-[9px] font-bold">Active</span>
+              </div>
+              <div className="flex items-baseline gap-3 mt-0.5">
+                <span className="text-xl sm:text-2xl font-black font-mono text-white">
+                  ₹{advanceSummary.availableBalance.toFixed(2)}
+                </span>
+                <span className="text-xs text-slate-400">
+                  (Used: ₹{advanceSummary.totalUsed.toFixed(2)} of ₹{advanceSummary.totalAdvance.toFixed(2)})
+                </span>
+              </div>
+            </div>
+          </div>
+          {onNavigateToAdvances && (
+            <button
+              type="button"
+              onClick={onNavigateToAdvances}
+              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer self-start sm:self-auto shrink-0 shadow-xs"
+            >
+              View Statement →
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Metrics Row */}
       {/* Metrics Row */}

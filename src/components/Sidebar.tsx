@@ -1,7 +1,7 @@
-import { LayoutDashboard, FileText, PlusCircle, User, BarChart2, FolderOpen, Shield, FileCheck, X, LogOut } from "lucide-react";
+import { LayoutDashboard, FileText, PlusCircle, User, BarChart2, FolderOpen, Shield, FileCheck, X, LogOut, Wallet } from "lucide-react";
 import { type EmployeeProfile } from "../lib/firebase";
 
-export type SidebarTab = "dashboard" | "submit" | "expenses" | "profile" | "analytics" | "reports" | "bills";
+export type SidebarTab = "dashboard" | "submit" | "expenses" | "advances" | "bills" | "profile" | "analytics" | "reports";
 
 interface SidebarProps {
   activeTab: SidebarTab;
@@ -15,6 +15,7 @@ interface SidebarProps {
 export default function Sidebar({ activeTab, onTabChange, user, isMobileOpen, onClose, onLogout }: SidebarProps) {
   const employeeMenuItems = [
     { id: "dashboard" as SidebarTab, label: "Dashboard", icon: LayoutDashboard },
+    { id: "advances" as SidebarTab, label: "Advance Wallet", icon: Wallet },
     { id: "submit" as SidebarTab, label: "New Expense", icon: PlusCircle },
     { id: "expenses" as SidebarTab, label: "My Expenses", icon: FileText },
     { id: "bills" as SidebarTab, label: "My Bill Documents", icon: FileCheck },
@@ -25,6 +26,7 @@ export default function Sidebar({ activeTab, onTabChange, user, isMobileOpen, on
 
   const adminMenuItems = [
     { id: "dashboard" as SidebarTab, label: "Admin Dashboard", icon: Shield },
+    { id: "advances" as SidebarTab, label: "Advance Management", icon: Wallet },
     { id: "bills" as SidebarTab, label: "Bill Document Vault", icon: FileCheck },
     { id: "expenses" as SidebarTab, label: "Expense Queue", icon: FileText },
     { id: "analytics" as SidebarTab, label: "Analytics Hub", icon: BarChart2 },

@@ -9,7 +9,10 @@ import {
 
   type EmployeeProfile, 
   type Expense, 
-  type BillFile 
+  type BillFile,
+  isAdvancePaymentMethod,
+  isPersonalPaymentMethod,
+  isSwPaymentMethod
 } from "../lib/firebase";
 import { 
   collectBillItems, 
@@ -42,7 +45,8 @@ import {
   FileCheck,
   CheckSquare,
   Square,
-  Trash2
+  Trash2,
+  Wallet
 } from "lucide-react";
 
 
@@ -64,6 +68,7 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
   const [gridDensity, setGridDensity] = useState<9 | 12>(9); // 9 or 12 images per document sheet
   const [selectedDay, setSelectedDay] = useState<string>(""); // "" = full month, "YYYY-MM-DD" = specific day
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [selectedPaymentType, setSelectedPaymentType] = useState<"all" | "advance" | "personal" | "sw_direct">("all");
 
   // Selection
   const [selectedBillIds, setSelectedBillIds] = useState<Set<string>>(new Set());
@@ -194,9 +199,38 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
     return true;
   });
 
+  // Calculate counts for separated bill types
+  let totalBillsCount = 0;
+  let advanceBillsCount = 0;
+  let personalBillsCount = 0;
+  let directSwBillsCount = 0;
+
+  filteredExpenses.forEach((exp) => {
+    const billsCount = (exp.bills || []).length;
+    totalBillsCount += billsCount;
+    if (isAdvancePaymentMethod(exp.paymentMethod, exp.paymentSource)) {
+      advanceBillsCount += billsCount;
+    } else if (isPersonalPaymentMethod(exp.paymentMethod, exp.paymentSource)) {
+      personalBillsCount += billsCount;
+    } else {
+      directSwBillsCount += billsCount;
+    }
+  });
+
   // Flat list of all bills matching filter
   const allFilteredBills: FlatBillItem[] = [];
   filteredExpenses.forEach((exp) => {
+    // Payment Type Filter (Separates Advance Bills vs Personal vs Direct SW)
+    if (selectedPaymentType === "advance" && !isAdvancePaymentMethod(exp.paymentMethod, exp.paymentSource)) {
+      return;
+    }
+    if (selectedPaymentType === "personal" && !isPersonalPaymentMethod(exp.paymentMethod, exp.paymentSource)) {
+      return;
+    }
+    if (selectedPaymentType === "sw_direct" && (isAdvancePaymentMethod(exp.paymentMethod, exp.paymentSource) || isPersonalPaymentMethod(exp.paymentMethod, exp.paymentSource))) {
+      return;
+    }
+
     (exp.bills || []).forEach((bill) => {
       // Search query filter
       const q = searchQuery.toLowerCase().trim();
@@ -225,6 +259,8 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
           amount: exp.totalAmount || exp.amount,
           expenseDate: exp.date,
           category: exp.category,
+          paymentMethod: exp.paymentMethod,
+          paymentSource: exp.paymentSource,
         });
       }
     });
@@ -322,12 +358,20 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
       const exportSetIds = new Set(billsToExport.map((b) => b.billId));
       const itemsToExport = fullBillItems.filter((i) => exportSetIds.has(i.billId));
 
+      const exportLabel = selectedPaymentType === "advance" 
+        ? `SW_Advance_${selectedDay || selectedMonth}_${selectedYear}` 
+        : selectedPaymentType === "personal"
+        ? `Personal_${selectedDay || selectedMonth}_${selectedYear}`
+        : selectedPaymentType === "sw_direct"
+        ? `SW_Direct_${selectedDay || selectedMonth}_${selectedYear}`
+        : selectedDay || undefined;
+
       await exportBillsToWordDocx(
         itemsToExport,
         activeEmployeeName,
         gridDensity,
         (statusMsg) => setGenProgressMsg(statusMsg),
-        selectedDay || undefined
+        exportLabel
       );
     } catch (err) {
       console.error("Failed to generate Word document:", err);
@@ -354,12 +398,20 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
       const exportSetIds = new Set(billsToExport.map((b) => b.billId));
       const itemsToExport = fullBillItems.filter((i) => exportSetIds.has(i.billId));
 
+      const exportLabel = selectedPaymentType === "advance" 
+        ? `SW_Advance_${selectedDay || selectedMonth}_${selectedYear}` 
+        : selectedPaymentType === "personal"
+        ? `Personal_${selectedDay || selectedMonth}_${selectedYear}`
+        : selectedPaymentType === "sw_direct"
+        ? `SW_Direct_${selectedDay || selectedMonth}_${selectedYear}`
+        : selectedDay || undefined;
+
       await exportBillsToPDF(
         itemsToExport,
         activeEmployeeName,
         gridDensity,
         (statusMsg) => setGenProgressMsg(statusMsg),
-        selectedDay || undefined
+        exportLabel
       );
     } catch (err) {
       console.error("Failed to generate PDF document:", err);
@@ -628,6 +680,60 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
           </div>
         </div>
 
+        {/* Separated Bill Category Tabs (SW Advance vs Personal vs Direct SW) */}
+        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
+          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1">Separate Bills:</span>
+          <button
+            type="button"
+            onClick={() => { setSelectedPaymentType("all"); setSelectedBillIds(new Set()); }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+              selectedPaymentType === "all"
+                ? "bg-slate-900 text-white shadow-xs"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            All Bills ({totalBillsCount})
+          </button>
+
+          <button
+            type="button"
+            id="tab-advance-bills"
+            onClick={() => { setSelectedPaymentType("advance"); setSelectedBillIds(new Set()); }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 border ${
+              selectedPaymentType === "advance"
+                ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
+                : "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100"
+            }`}
+          >
+            <Wallet className="h-3.5 w-3.5" />
+            SW Advance Bills ({advanceBillsCount})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { setSelectedPaymentType("personal"); setSelectedBillIds(new Set()); }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 border ${
+              selectedPaymentType === "personal"
+                ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
+                : "bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100"
+            }`}
+          >
+            Personal Bills ({personalBillsCount})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { setSelectedPaymentType("sw_direct"); setSelectedBillIds(new Set()); }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 border ${
+              selectedPaymentType === "sw_direct"
+                ? "bg-purple-600 text-white border-purple-600 shadow-xs"
+                : "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"
+            }`}
+          >
+            Direct SW Bills ({directSwBillsCount})
+          </button>
+        </div>
+
         {/* Document Action Buttons Banner */}
         <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -641,7 +747,7 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
               <p className="text-[11px] text-slate-500 font-mono mt-0.5">
                 Filename:{" "}
                 <span className="text-indigo-600 font-semibold">
-                  {generateBillFilename(activeEmployeeName, "docx")}
+                  {generateBillFilename(activeEmployeeName, "docx", selectedPaymentType === "advance" ? `SW_Advance_${selectedDay || selectedMonth}_${selectedYear}` : selectedDay || undefined)}
                 </span>
               </p>
             </div>

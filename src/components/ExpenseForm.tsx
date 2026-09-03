@@ -2,11 +2,14 @@ import React, { useState, useEffect } from "react";
 import {
   submitExpense,
   checkForDuplicateBill,
+  subscribeToAdvances,
+  subscribeToExpenses,
+  calculateAdvanceSummary,
   type EmployeeProfile,
   type BillFile,
   type Expense
 } from "../lib/firebase";
-import { Upload, FileText, Image, Trash2, X, AlertTriangle, Sparkles, Receipt, Coins, Eye, ZoomIn, ZoomOut, RotateCcw, RotateCw, RefreshCw, Calculator, Loader2, Plus, ChevronLeft, ChevronRight, UserCheck, Building2 } from "lucide-react";
+import { Upload, FileText, Image, Trash2, X, AlertTriangle, Sparkles, Receipt, Coins, Eye, ZoomIn, ZoomOut, RotateCcw, RotateCw, RefreshCw, Calculator, Loader2, Plus, ChevronLeft, ChevronRight, UserCheck, Building2, Wallet, CheckCircle2 } from "lucide-react";
 
 import { motion, AnimatePresence } from "motion/react";
 
@@ -21,10 +24,40 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
   const [amount, setAmount] = useState("");
   const [vendor, setVendor] = useState("");
   const [paymentType, setPaymentType] = useState<"Personal Payment" | "SW Payment">("Personal Payment");
+  const [swPaymentMode, setSwPaymentMode] = useState<"advance" | "direct">("advance");
   const [paymentSubMode, setPaymentSubMode] = useState<string>("");
   const [expenseCategory, setExpenseCategory] = useState("");
   const [customCategory, setCustomCategory] = useState("");
   const [schoolLocationDetails, setSchoolLocationDetails] = useState("");
+
+  // Live Advance Balance Tracking
+  const [advanceSummary, setAdvanceSummary] = useState<{
+    totalAdvance: number;
+    totalUsed: number;
+    availableBalance: number;
+    pendingAdvanceAmount: number;
+  }>({ totalAdvance: 0, totalUsed: 0, availableBalance: 0, pendingAdvanceAmount: 0 });
+
+  useEffect(() => {
+    let curAdvs: any[] = [];
+    let curExps: any[] = [];
+    const update = () => {
+      const s = calculateAdvanceSummary(user.employeeId, curAdvs, curExps, user.email, user.name);
+      setAdvanceSummary(s);
+    };
+    const unsubA = subscribeToAdvances((advs) => {
+      curAdvs = advs;
+      update();
+    });
+    const unsubE = subscribeToExpenses((exps) => {
+      curExps = exps;
+      update();
+    });
+    return () => {
+      unsubA();
+      unsubE();
+    };
+  }, [user]);
 
   const [uploadedBills, setUploadedBills] = useState<BillFile[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -345,7 +378,11 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
     setSubmitting(true);
     setMessage(null);
 
-    const finalPaymentMethod = (paymentSubMode ? `${paymentType} (${paymentSubMode})` : paymentType) as any;
+    const isUsingAdvance = paymentType === "SW Payment" && swPaymentMode === "advance" && advanceSummary.availableBalance > 0;
+    const finalPaymentSource = isUsingAdvance ? "advance" : paymentType === "SW Payment" ? "company" : "personal_reimbursement";
+    const finalPaymentMethod = (paymentSubMode 
+      ? `${paymentType}${isUsingAdvance ? " (Advance)" : ""} (${paymentSubMode})` 
+      : `${paymentType}${isUsingAdvance ? " (Advance)" : ""}`) as any;
 
     try {
       await submitExpense({
@@ -358,6 +395,7 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
         amount: parsedAmount,
         vendor,
         paymentMethod: finalPaymentMethod,
+        paymentSource: finalPaymentSource,
         description: finalDescription,
         totalAmount,
         bills: uploadedBills
@@ -575,7 +613,7 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 block mb-1.5">Method of Payment*</label>
               
-              {/* Quick Choice Pills for Personal Payment vs SW Payment */}
+              {/* Quick Choice Pills: Personal Payment vs SW Payment */}
               <div className="grid grid-cols-2 gap-2 mb-2">
                 <button
                   type="button"
@@ -589,8 +627,8 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
                 >
                   <UserCheck className={`h-4 w-4 flex-shrink-0 ${paymentType === "Personal Payment" ? "text-indigo-600" : "text-slate-400"}`} />
                   <div className="text-left">
-                    <span className="block font-bold">Personal Payment</span>
-                    <span className="block text-[10px] text-slate-500 font-normal">Paid by Employee</span>
+                    <span className="block font-bold">Personal</span>
+                    <span className="block text-[10px] text-slate-500 font-normal">Reimbursable</span>
                   </div>
                 </button>
 
@@ -607,10 +645,76 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
                   <Building2 className={`h-4 w-4 flex-shrink-0 ${paymentType === "SW Payment" ? "text-purple-600" : "text-slate-400"}`} />
                   <div className="text-left">
                     <span className="block font-bold">SW Payment</span>
-                    <span className="block text-[10px] text-slate-500 font-normal">Paid by SW / Company</span>
+                    <span className="block text-[10px] text-slate-500 font-normal">Company Direct / Advance</span>
                   </div>
                 </button>
               </div>
+
+              {/* When SW Payment is chosen: Check whether employee has SW Advance with them */}
+              {paymentType === "SW Payment" && (
+                advanceSummary.availableBalance > 0 ? (
+                  <div className="p-3.5 bg-purple-50/80 border border-purple-200 rounded-2xl mb-2 space-y-2.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Wallet className="h-4 w-4 text-purple-700" />
+                        <span className="font-bold text-purple-950 text-[11px] uppercase tracking-wider">SW Advance with Employee:</span>
+                      </div>
+                      <span className="font-mono text-sm font-black text-purple-900 bg-white px-2.5 py-0.5 rounded-lg border border-purple-200 shadow-2xs">
+                        ₹{advanceSummary.availableBalance.toFixed(2)}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSwPaymentMode("advance")}
+                        className={`p-2 rounded-xl border font-bold transition flex items-center justify-center gap-1.5 cursor-pointer text-xs ${
+                          swPaymentMode === "advance"
+                            ? "bg-purple-600 text-white border-purple-600 shadow-xs"
+                            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Deduct from SW Advance
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSwPaymentMode("direct")}
+                        className={`p-2 rounded-xl border font-bold transition flex items-center justify-center gap-1.5 cursor-pointer text-xs ${
+                          swPaymentMode === "direct"
+                            ? "bg-purple-600 text-white border-purple-600 shadow-xs"
+                            : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        Direct SW Payment
+                      </button>
+                    </div>
+
+                    {swPaymentMode === "advance" && (
+                      <div className="space-y-1">
+                        <p className="text-[11px] text-purple-800 font-medium">
+                          When this bill is submitted, ₹{parsedAmount > 0 ? parsedAmount.toFixed(2) : "the claim amount"} will be decreased from your advance balance immediately.
+                        </p>
+                        {parsedAmount > advanceSummary.availableBalance && (
+                          <p className="text-[11px] text-amber-800 font-semibold flex items-center gap-1.5 bg-amber-50 p-2 rounded-xl border border-amber-200">
+                            <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                            Warning: Bill amount (₹{parsedAmount.toFixed(2)}) exceeds available SW advance balance (₹{advanceSummary.availableBalance.toFixed(2)}).
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl mb-2 text-xs text-slate-500 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <Wallet className="h-3.5 w-3.5 text-slate-400" />
+                      No SW advance balance with employee
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-600 uppercase bg-slate-200 px-2 py-0.5 rounded">Direct SW Payment</span>
+                  </div>
+                )
+              )}
 
               <select
                 id="form-payment"

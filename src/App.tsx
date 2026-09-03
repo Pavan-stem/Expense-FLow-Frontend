@@ -11,6 +11,7 @@ import ProfileView from "./components/ProfileView";
 import AnalyticsHub from "./components/AnalyticsHub";
 import Reports from "./components/Reports";
 import BillDocumentHub from "./components/BillDocumentHub";
+import AdvanceManagement from "./components/AdvanceManagement";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function App() {
@@ -123,6 +124,7 @@ export default function App() {
                     user={currentUser}
                     onNavigateToSubmit={() => setActiveTab("submit")}
                     onNavigateToExpenses={() => setActiveTab("expenses")}
+                    onNavigateToAdvances={() => setActiveTab("advances")}
                     refreshTrigger={refreshTrigger}
                   />
                 )
@@ -137,6 +139,14 @@ export default function App() {
                 />
               )}
 
+
+              {activeTab === "advances" && (
+                <AdvanceManagement
+                  user={currentUser}
+                  refreshTrigger={refreshTrigger}
+                  onNavigateToSubmit={() => setActiveTab("submit")}
+                />
+              )}
 
               {activeTab === "expenses" && (
                 <ExpenseList

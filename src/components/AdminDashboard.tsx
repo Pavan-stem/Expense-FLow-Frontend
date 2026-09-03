@@ -24,7 +24,8 @@ import {
   type ExpenseCategory,
   type VoucherComment,
   isSwPaymentMethod,
-  isPersonalPaymentMethod
+  isPersonalPaymentMethod,
+  isAdvancePaymentMethod
 } from "../lib/firebase";
 import { 
   collectBillItems, 
@@ -1822,7 +1823,12 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                   {activeActionStatus === "approved" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
                   Approve
                 </button>
-                {viewingVoucherDetails.status === "reimbursed" ? (
+                {isAdvancePaymentMethod(viewingVoucherDetails.paymentMethod, viewingVoucherDetails.paymentSource) ? (
+                  <span className="px-3 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1">
+                    <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+                    Advance Claim
+                  </span>
+                ) : viewingVoucherDetails.status === "reimbursed" ? (
                   <button
                     id="admin-modal-reverse-btn"
                     type="button"

@@ -97,7 +97,8 @@ export default function EditExpenseModal({
   const [gstAmount, setGstAmount] = useState<string>((expense.gstAmount || 0).toString());
   
   // Payment mode parsing
-  const [paymentType, setPaymentType] = useState<"Personal Payment" | "SW Payment">(() => {
+  const [paymentType, setPaymentType] = useState<"Personal Payment" | "SW Payment" | "Advance Payment">(() => {
+    if (expense.paymentSource === "advance" || (expense.paymentMethod && expense.paymentMethod.startsWith("Advance Payment"))) return "Advance Payment";
     if (expense.paymentMethod && expense.paymentMethod.startsWith("SW Payment")) return "SW Payment";
     return "Personal Payment";
   });
@@ -396,9 +397,13 @@ export default function EditExpenseModal({
     setSubmitting(true);
     setAlertMsg(null);
 
-    const finalPaymentMethod = (paymentSubMode ? `${paymentType} (${paymentSubMode})` : paymentType) as any;
+    const finalPaymentMethod = (paymentType === "Advance Payment"
+      ? (paymentSubMode ? `SW Payment (Advance - ${paymentSubMode})` : "SW Payment (Advance)")
+      : (paymentSubMode ? `${paymentType} (${paymentSubMode})` : paymentType)) as any;
 
     try {
+      const finalPaymentSource = paymentType === "Advance Payment" ? "advance" : paymentType === "SW Payment" ? "company" : "personal_reimbursement";
+
       const updatedFields: Partial<Expense> = {
         title: finalDescription,
         category: finalCategory,
@@ -406,6 +411,7 @@ export default function EditExpenseModal({
         amount: parsedAmount,
         vendor: vendor.trim(),
         paymentMethod: finalPaymentMethod,
+        paymentSource: finalPaymentSource,
         description: finalDescription,
         gstAmount: parsedGst,
         totalAmount: calculatedTotal,
@@ -650,7 +656,8 @@ export default function EditExpenseModal({
                     className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                   >
                     <option value="Personal Payment">Personal Payment (Out of Pocket)</option>
-                    <option value="SW Payment">SW Payment (Company Paid)</option>
+                    <option value="SW Payment">SW Payment (Direct Company Paid)</option>
+                    <option value="Advance Payment">SW Payment (Deduct from Advance)</option>
                   </select>
                 </div>
 

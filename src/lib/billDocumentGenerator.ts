@@ -18,6 +18,7 @@ export interface FlatBillItem {
   expenseDate: string;
   category: string;
   paymentMethod?: string;
+  paymentSource?: string;
 }
 
 /**

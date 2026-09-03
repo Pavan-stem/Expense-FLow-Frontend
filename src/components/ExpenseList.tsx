@@ -19,7 +19,8 @@ import {
   type ExpenseCategory,
   type BillFile,
   type VoucherComment,
-  isSwPaymentMethod
+  isSwPaymentMethod,
+  isAdvancePaymentMethod
 } from "../lib/firebase";
 import { 
   collectBillItems, 
@@ -112,6 +113,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
   const [filterYear, setFilterYear] = useState(new Date().getFullYear().toString());
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterPaymentMode, setFilterPaymentMode] = useState("");
 
   // Track viewed expense timestamps to manage unread badges
   const [viewedExpenseTimestamps, setViewedExpenseTimestamps] = useState<Record<string, number>>(() => {
@@ -617,6 +619,15 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
     // Status
     if (filterStatus && exp.status !== filterStatus) return false;
 
+    // Payment Mode Filter (Separated SW Advance vs SW Direct vs Personal)
+    if (filterPaymentMode === "advance") {
+      if (!isAdvancePaymentMethod(exp.paymentMethod, exp.paymentSource)) return false;
+    } else if (filterPaymentMode === "sw_direct") {
+      if (isAdvancePaymentMethod(exp.paymentMethod, exp.paymentSource) || !isSwPaymentMethod(exp.paymentMethod, exp.paymentSource)) return false;
+    } else if (filterPaymentMode === "personal") {
+      if (!isPersonalPaymentMethod(exp.paymentMethod, exp.paymentSource)) return false;
+    }
+
     // Monthly Grouping Filter
     if (filterMonth || filterYear) {
       const expDate = new Date(exp.date);
@@ -863,6 +874,19 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
             <option value="rejected">Rejected</option>
             <option value="reimbursed">Reimbursed</option>
           </select>
+
+          {/* Payment Mode Filter */}
+          <select
+            id="filter-payment-mode-select"
+            value={filterPaymentMode}
+            onChange={(e) => setFilterPaymentMode(e.target.value)}
+            className="px-3 py-2 w-full border border-slate-200 rounded-xl text-slate-900 bg-slate-50 text-xs focus:bg-white focus:ring-1 focus:ring-indigo-500 outline-none transition font-semibold"
+          >
+            <option value="">All Payment Modes</option>
+            <option value="advance">🟢 SW Advance Claims</option>
+            <option value="sw_direct">🟣 Direct SW Payments</option>
+            <option value="personal">🔵 Personal Payments</option>
+          </select>
         </div>
 
         {/* Advanced Month Filters Row */}
@@ -995,7 +1019,9 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                     </td>
                     <td className="py-3.5 px-4 whitespace-nowrap">
                       <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border uppercase font-mono tracking-wider ${
-                        exp.paymentMethod?.includes("SW Payment")
+                        isAdvancePaymentMethod(exp.paymentMethod, exp.paymentSource)
+                          ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                          : exp.paymentMethod?.includes("SW Payment")
                           ? "bg-purple-50 text-purple-700 border-purple-200"
                           : exp.paymentMethod?.includes("Personal Payment")
                           ? "bg-indigo-50 text-indigo-700 border-indigo-200"
@@ -1160,7 +1186,9 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                       <div>
                         <span className="font-semibold text-slate-400">Payment:</span>{" "}
                         <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold ${
-                          selectedExpense.paymentMethod?.includes("SW Payment")
+                          isAdvancePaymentMethod(selectedExpense.paymentMethod, selectedExpense.paymentSource)
+                            ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                            : selectedExpense.paymentMethod?.includes("SW Payment")
                             ? "bg-purple-50 text-purple-700 border border-purple-100"
                             : selectedExpense.paymentMethod?.includes("Personal Payment")
                             ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
@@ -1429,7 +1457,12 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                       {activeActionStatus === "approved" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
                       Approve Claim
                     </button>
-                    {selectedExpense.status === "reimbursed" ? (
+                    {isAdvancePaymentMethod(selectedExpense.paymentMethod, selectedExpense.paymentSource) ? (
+                      <span className="px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1">
+                        <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+                        Advance Claim
+                      </span>
+                    ) : selectedExpense.status === "reimbursed" ? (
                       <button
                         id="admin-reverse-claim"
                         onClick={() => handleStatusChange(selectedExpense, "approved")}

@@ -67,6 +67,23 @@ export interface VoucherComment {
   timestamp: string;
 }
 
+export interface AdvancePayment {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeEmail?: string;
+  amount: number;
+  paymentDate: string; // YYYY-MM-DD
+  paymentMethod: string; // "Bank Transfer" | "UPI" | "Cash" | "Cheque" | "Company Card" | string;
+  purpose: string;
+  referenceNumber?: string;
+  status: "active" | "cancelled";
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  notes?: string;
+}
+
 export interface Expense {
   id: string;
   employeeId: string;
@@ -77,7 +94,8 @@ export interface Expense {
   date: string; // YYYY-MM-DD
   amount: number;
   vendor: string;
-  paymentMethod: "Personal Payment" | "SW Payment" | "Cash" | "UPI" | "UPI+Cash" | "Credit Card" | "Debit Card" | "Bank Transfer";
+  paymentMethod: "Personal Payment" | "SW Payment" | "Advance Payment" | "Cash" | "UPI" | "UPI+Cash" | "Credit Card" | "Debit Card" | "Bank Transfer" | string;
+  paymentSource?: "advance" | "company" | "personal_reimbursement";
   description: string;
   projectName?: string;
   billNumber?: string;
@@ -133,22 +151,37 @@ export const PREDEFINED_CATEGORIES = [
 ];
 
 /**
- * Check if a payment method corresponds to SW Payment (company paid directly).
+ * Check if a payment method corresponds to SW Payment (company paid directly or via advance).
  * SW Payments are not out-of-pocket expenses and should never be reimbursed to the employee.
  */
-export function isSwPaymentMethod(method?: string): boolean {
+export function isSwPaymentMethod(method?: string, source?: string): boolean {
+  if (source === "advance" || source === "company") return true;
   if (!method) return false;
   const m = method.trim();
   if (m.includes("SW Payment")) return true;
+  if (m.includes("Advance")) return true;
   if (m === "Bank Transfer" || m === "Credit Card") return true;
   return false;
 }
 
 /**
- * Check if a payment method corresponds to Personal Payment (paid by employee out-of-pocket).
+ * Check if a payment method/source corresponds to Advance Payment (paid using company advance).
  */
-export function isPersonalPaymentMethod(method?: string): boolean {
-  return !isSwPaymentMethod(method);
+export function isAdvancePaymentMethod(method?: string, source?: string): boolean {
+  if (source === "advance") return true;
+  if (!method) return false;
+  return method.trim().includes("Advance");
+}
+
+/**
+ * Check if a payment method corresponds to Personal Payment (paid by employee out-of-pocket).
+ * Advance payments and SW company payments are excluded.
+ */
+export function isPersonalPaymentMethod(method?: string, source?: string): boolean {
+  if (source === "personal_reimbursement") return true;
+  if (source === "company" || source === "advance") return false;
+  if (isAdvancePaymentMethod(method, source)) return false;
+  return !isSwPaymentMethod(method, source);
 }
 
 /**
@@ -1469,5 +1502,235 @@ export async function unmarkAllEmployeesExpensesAsReimbursed(
     console.error("Error reversing all reimbursed expenses:", error);
     throw error;
   }
+}
+
+// ==========================================
+// EMPLOYEE ADVANCE PAYMENT MANAGEMENT
+// ==========================================
+
+/**
+ * Record a new advance payment to an employee by Admin.
+ */
+export async function createAdvancePayment(advanceData: Omit<AdvancePayment, "id" | "createdAt" | "status">): Promise<string> {
+  try {
+    const dataToSave: Record<string, any> = {
+      employeeId: advanceData.employeeId || "",
+      employeeName: advanceData.employeeName || "",
+      employeeEmail: advanceData.employeeEmail || "",
+      amount: Number(advanceData.amount) || 0,
+      paymentDate: advanceData.paymentDate || new Date().toISOString().split("T")[0],
+      paymentMethod: advanceData.paymentMethod || "Bank Transfer",
+      purpose: advanceData.purpose || "",
+      referenceNumber: advanceData.referenceNumber ? advanceData.referenceNumber.trim() : "",
+      status: "active",
+      createdBy: advanceData.createdBy || "",
+      createdByName: advanceData.createdByName || "",
+      createdAt: new Date().toISOString()
+    };
+
+    if (advanceData.notes) {
+      dataToSave.notes = advanceData.notes;
+    }
+
+    const docRef = await addDoc(collection(db, "advances"), dataToSave);
+
+    await logActivity(
+      advanceData.createdBy,
+      advanceData.createdByName,
+      "Pay Advance",
+      `Disbursed advance of ₹${advanceData.amount} to ${advanceData.employeeName} via ${advanceData.paymentMethod} (Purpose: ${advanceData.purpose})`
+    );
+
+    // Notify employee of advance payment
+    if (advanceData.employeeId) {
+      await createNotification(
+        advanceData.employeeId,
+        "Advance Payment Received",
+        `An advance payment of ₹${advanceData.amount} has been credited to your advance balance by ${advanceData.createdByName}. Purpose: ${advanceData.purpose}`
+      );
+    }
+
+    return docRef.id;
+  } catch (error) {
+    console.error("Error creating advance payment:", error);
+    throw error;
+  }
+}
+
+/**
+ * Retrieve all advance payments.
+ */
+export async function getAdvances(): Promise<AdvancePayment[]> {
+  try {
+    const snap = await getDocs(collection(db, "advances"));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as AdvancePayment));
+  } catch (error) {
+    console.error("Error fetching advances:", error);
+    return [];
+  }
+}
+
+/**
+ * Retrieve advances for a specific employee.
+ */
+export async function getAdvancesByEmployee(employeeId: string): Promise<AdvancePayment[]> {
+  try {
+    const q = query(
+      collection(db, "advances"),
+      where("employeeId", "==", employeeId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as AdvancePayment));
+  } catch (error) {
+    console.error("Error fetching employee advances:", error);
+    return [];
+  }
+}
+
+/**
+ * Real-time subscription to all advance payments.
+ */
+export function subscribeToAdvances(callback: (advances: AdvancePayment[]) => void): () => void {
+  const colRef = collection(db, "advances");
+  return onSnapshot(colRef, (snapshot) => {
+    const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AdvancePayment));
+    // Sort client-side by paymentDate descending
+    list.sort((a, b) => (b.paymentDate || b.createdAt || "").localeCompare(a.paymentDate || a.createdAt || ""));
+    callback(list);
+  }, (err) => {
+    console.error("Advance subscription error:", err);
+  });
+}
+
+/**
+ * Real-time subscription to advances for a specific employee.
+ */
+export function subscribeToAdvancesByEmployee(
+  employeeId: string,
+  callback: (advances: AdvancePayment[]) => void
+): () => void {
+  const q = query(
+    collection(db, "advances"),
+    where("employeeId", "==", employeeId)
+  );
+  return onSnapshot(q, (snapshot) => {
+    const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AdvancePayment));
+    list.sort((a, b) => (b.paymentDate || b.createdAt || "").localeCompare(a.paymentDate || a.createdAt || ""));
+    callback(list);
+  }, (err) => {
+    console.error("Employee advance subscription error:", err);
+  });
+}
+
+/**
+ * Cancel / reverse an advance payment if entered mistakenly.
+ */
+export async function cancelAdvancePayment(
+  advanceId: string,
+  adminUserId: string,
+  adminName: string,
+  reason?: string
+): Promise<void> {
+  try {
+    const docRef = doc(db, "advances", advanceId);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      throw new Error("Advance payment record not found.");
+    }
+    const data = snap.data() as AdvancePayment;
+    await updateDoc(docRef, {
+      status: "cancelled",
+      cancelledBy: adminUserId,
+      cancelledByName: adminName,
+      cancelledAt: new Date().toISOString(),
+      cancelReason: reason || "Cancelled by admin"
+    });
+
+    await logActivity(
+      adminUserId,
+      adminName,
+      "Cancel Advance",
+      `Cancelled advance ID ${advanceId} of ₹${data.amount} for ${data.employeeName}. Reason: ${reason || "N/A"}`
+    );
+  } catch (error) {
+    console.error("Error cancelling advance payment:", error);
+    throw error;
+  }
+}
+
+/**
+ * Match helper to verify if an expense belongs to a given employee.
+ */
+function isExpenseOfEmployee(exp: Expense, employeeId: string, employeeEmail?: string, employeeName?: string): boolean {
+  if (employeeId && exp.employeeId && exp.employeeId.toLowerCase().trim() === employeeId.toLowerCase().trim()) return true;
+  if (employeeEmail && exp.employeeEmail && exp.employeeEmail.toLowerCase().trim() === employeeEmail.toLowerCase().trim()) return true;
+  if (employeeName && exp.employeeName && exp.employeeName.toLowerCase().trim() === employeeName.toLowerCase().trim()) return true;
+  return false;
+}
+
+/**
+ * Compute the Advance Summary and Available Balance for an employee.
+ * Logic:
+ *  totalAdvance = SUM(all active advance payments for employee)
+ *  totalUsed = SUM(all approved/reimbursed expenses where paymentSource === "advance" or paymentMethod includes "Advance Payment")
+ *  availableBalance = Math.max(0, totalAdvance - totalUsed)
+ *  pendingAdvanceAmount = SUM(all pending/under_review advance expenses)
+ */
+export function calculateAdvanceSummary(
+  employeeId: string,
+  advances: AdvancePayment[],
+  expenses: Expense[],
+  employeeEmail?: string,
+  employeeName?: string
+): {
+  totalAdvance: number;
+  totalUsed: number;
+  availableBalance: number;
+  pendingAdvanceAmount: number;
+  activeAdvanceCount: number;
+  approvedClaimsCount: number;
+  pendingClaimsCount: number;
+} {
+  // 1. Filter active advances for this employee
+  const employeeAdvances = advances.filter(adv => {
+    if (adv.status === "cancelled") return false;
+    if (adv.employeeId && employeeId && adv.employeeId.toLowerCase().trim() === employeeId.toLowerCase().trim()) return true;
+    if (adv.employeeEmail && employeeEmail && adv.employeeEmail.toLowerCase().trim() === employeeEmail.toLowerCase().trim()) return true;
+    if (adv.employeeName && employeeName && adv.employeeName.toLowerCase().trim() === employeeName.toLowerCase().trim()) return true;
+    return false;
+  });
+
+  const totalAdvance = employeeAdvances.reduce((sum, adv) => sum + (Number(adv.amount) || 0), 0);
+
+  // 2. Filter advance expenses for this employee
+  const employeeAdvanceExpenses = expenses.filter(exp => {
+    if (!isExpenseOfEmployee(exp, employeeId, employeeEmail, employeeName)) return false;
+    return isAdvancePaymentMethod(exp.paymentMethod, exp.paymentSource);
+  });
+
+  // When a bill is submitted using advance, it immediately decreases the available advance balance
+  // Only rejected claims are excluded (their amount is restored back to the advance balance)
+  const submittedClaims = employeeAdvanceExpenses.filter(e => e.status !== "rejected");
+  const totalUsed = submittedClaims.reduce((sum, e) => sum + (Number(e.totalAmount || e.amount) || 0), 0);
+
+  const approvedClaims = employeeAdvanceExpenses.filter(e => e.status === "approved" || e.status === "reimbursed");
+  const approvedUsed = approvedClaims.reduce((sum, e) => sum + (Number(e.totalAmount || e.amount) || 0), 0);
+
+  const pendingClaims = employeeAdvanceExpenses.filter(e => e.status === "pending" || e.status === "under_review");
+  const pendingAdvanceAmount = pendingClaims.reduce((sum, e) => sum + (Number(e.totalAmount || e.amount) || 0), 0);
+
+  const availableBalance = Math.max(0, totalAdvance - totalUsed);
+
+  return {
+    totalAdvance,
+    totalUsed,
+    approvedUsed,
+    availableBalance,
+    pendingAdvanceAmount,
+    activeAdvanceCount: employeeAdvances.length,
+    submittedClaimsCount: submittedClaims.length,
+    approvedClaimsCount: approvedClaims.length,
+    pendingClaimsCount: pendingClaims.length
+  };
 }
 
