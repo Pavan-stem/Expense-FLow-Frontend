@@ -33,7 +33,10 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const dbId = firebaseConfig.firestoreDatabaseId?.trim();
+export const db = (dbId && dbId !== "(default)")
+  ? getFirestore(app, dbId)
+  : getFirestore(app);
 
 // Types
 export interface EmployeeProfile {
@@ -1685,9 +1688,11 @@ export function calculateAdvanceSummary(
 ): {
   totalAdvance: number;
   totalUsed: number;
+  approvedUsed?: number;
   availableBalance: number;
   pendingAdvanceAmount: number;
   activeAdvanceCount: number;
+  submittedClaimsCount?: number;
   approvedClaimsCount: number;
   pendingClaimsCount: number;
 } {

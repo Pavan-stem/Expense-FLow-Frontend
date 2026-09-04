@@ -20,7 +20,8 @@ import {
   type BillFile,
   type VoucherComment,
   isSwPaymentMethod,
-  isAdvancePaymentMethod
+  isAdvancePaymentMethod,
+  isPersonalPaymentMethod
 } from "../lib/firebase";
 import { 
   collectBillItems, 
