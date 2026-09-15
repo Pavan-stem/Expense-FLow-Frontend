@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { 
   getExpensesByEmployee, 
   subscribeToAdvances,
@@ -49,6 +49,13 @@ export default function EmployeeDashboard({ user, onNavigateToSubmit, onNavigate
     pendingAdvanceAmount: 0
   });
 
+  // Keep a ref to the latest expenses so the advances subscription always
+  // reads the current value without being a dependency (avoids infinite loops).
+  const expensesRef = useRef<Expense[]>(expenses);
+  useEffect(() => {
+    expensesRef.current = expenses;
+  }, [expenses]);
+
   useEffect(() => {
     const fetchExpenses = async () => {
       setLoading(true);
@@ -64,11 +71,12 @@ export default function EmployeeDashboard({ user, onNavigateToSubmit, onNavigate
     fetchExpenses();
 
     const unsubAdv = subscribeToAdvances((advs) => {
-      setAdvanceSummary(prev => calculateAdvanceSummary(user.employeeId, advs, expenses, user.email, user.name));
+      setAdvanceSummary(calculateAdvanceSummary(user.employeeId, advs, expensesRef.current, user.email, user.name));
     });
 
     return () => unsubAdv();
-  }, [user, refreshTrigger, expenses.length]);
+  // Only re-run when the user identity or manual refresh changes — NOT on every expenses update
+  }, [user.employeeId, user.email, user.name, refreshTrigger]);
 
   const now = new Date();
   const currentMonthIdx = now.getMonth();

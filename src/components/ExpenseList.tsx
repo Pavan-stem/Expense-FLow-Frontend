@@ -630,10 +630,26 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
     }
 
     // Monthly Grouping Filter
+    // Parse YYYY-MM-DD as local date (not UTC) to avoid timezone-shift issues
+    // where e.g. 2026-09-01 UTC becomes 2026-08-31 in IST (+5:30).
     if (filterMonth || filterYear) {
-      const expDate = new Date(exp.date);
-      const expMonth = expDate.toLocaleString("default", { month: "long" });
-      const expYear = expDate.getFullYear().toString();
+      let expMonth = "";
+      let expYear = "";
+      if (exp.date && exp.date.includes("-")) {
+        const parts = exp.date.split("-");
+        if (parts.length === 3) {
+          // Build date using local constructor: new Date(year, month-1, day)
+          const localDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+          expMonth = localDate.toLocaleString("default", { month: "long" });
+          expYear = localDate.getFullYear().toString();
+        }
+      }
+      if (!expMonth) {
+        // Fallback for unexpected date formats
+        const expDate = new Date(exp.date);
+        expMonth = expDate.toLocaleString("default", { month: "long" });
+        expYear = expDate.getFullYear().toString();
+      }
 
       if (filterMonth && expMonth !== filterMonth) return false;
       if (filterYear && expYear !== filterYear) return false;
