@@ -14,8 +14,8 @@ import {
 import { 
   Wallet, 
   PlusCircle, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
+  ArrowUpRight,
+  ArrowDownLeft,
   Clock, 
   CheckCircle2, 
   Search, 
@@ -23,7 +23,6 @@ import {
   RefreshCw, 
   AlertCircle,
   Building2,
-  Receipt,
   History
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -42,7 +41,6 @@ export default function AdvanceManagement({ user, refreshTrigger, onNavigateToSu
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeSubTab, setActiveSubTab] = useState<"receipts" | "expenses">("receipts");
 
   // Admin Modal States
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
@@ -214,79 +212,147 @@ export default function AdvanceManagement({ user, refreshTrigger, onNavigateToSu
 
   const totalCompanyOutstandingBalance = Math.max(0, totalCompanyAdvance - totalCompanyUsed);
 
-  // Build Chronological Statement for Selected Employee
-  const buildEmployeeStatement = (targetEmp: EmployeeProfile) => {
-    const empAdvances = advances.filter(a => 
-      (a.employeeEmail && a.employeeEmail.toLowerCase() === targetEmp.email.toLowerCase()) ||
-      (a.employeeId && a.employeeId.toLowerCase() === targetEmp.employeeId.toLowerCase()) ||
-      (a.employeeName && a.employeeName.toLowerCase() === targetEmp.name.toLowerCase())
-    );
+  // ─── Per-Advance Bucket Types ───────────────────────────────────────────────
+  type BucketExpenseRow = {
+    expense: Expense;
+    date: string;
+    title: string;
+    details: string;
+    amount: number;
+    status: string;
+    runningBalanceInBucket: number; // countdown balance within this advance bucket
+  };
 
-    const empAdvanceExpenses = expenses.filter(e => 
-      isAdvancePaymentMethod(e.paymentMethod, e.paymentSource) &&
-      ((e.employeeEmail && e.employeeEmail.toLowerCase() === targetEmp.email.toLowerCase()) ||
-       (e.employeeId && e.employeeId.toLowerCase() === targetEmp.employeeId.toLowerCase()) ||
-       (e.employeeName && e.employeeName.toLowerCase() === targetEmp.name.toLowerCase()))
-    );
+  type AdvanceBucket = {
+    advance: AdvancePayment;
+    advanceIndex: number;          // 1-based display index
+    advanceAmount: number;
+    spentInBucket: number;         // total of approved expenses assigned to bucket
+    remainingInBucket: number;     // advanceAmount - spentInBucket
+    isFullyUsed: boolean;
+    isCancelled: boolean;
+    rows: BucketExpenseRow[];
+  };
 
-    type LedgerEntry = {
-      id: string;
-      date: string;
-      type: "CREDIT" | "DEBIT";
-      title: string;
-      details: string;
-      amount: number;
-      status: string;
-      rawAdvance?: AdvancePayment;
-      rawExpense?: Expense;
-    };
+  /**
+   * Assigns advance expenses to advance buckets sequentially:
+   * - Approved/reimbursed expenses consume the current bucket's remaining balance.
+   * - When a bucket's remaining hits 0, the next bucket becomes current.
+   * - Pending/rejected expenses are also shown in the current bucket for context
+   *   but only approved ones count against the balance.
+   */
+  const buildAdvanceBuckets = (targetEmp: EmployeeProfile): AdvanceBucket[] => {
+    // 1. Collect advances for this employee (all statuses so we can show cancelled too)
+    const empAdvances = advances
+      .filter(a =>
+        (a.employeeEmail && a.employeeEmail.toLowerCase() === targetEmp.email.toLowerCase()) ||
+        (a.employeeId && a.employeeId.toLowerCase() === targetEmp.employeeId.toLowerCase()) ||
+        (a.employeeName && a.employeeName.toLowerCase() === targetEmp.name.toLowerCase())
+      )
+      .sort((a, b) => {
+        const da = a.paymentDate || a.createdAt?.split("T")[0] || "";
+        const db = b.paymentDate || b.createdAt?.split("T")[0] || "";
+        return da.localeCompare(db);
+      });
 
-    const entries: LedgerEntry[] = [
-      ...empAdvances.map(a => ({
-        id: a.id,
-        date: a.paymentDate || a.createdAt?.split("T")[0] || "",
-        type: "CREDIT" as const,
-        title: `Advance Paid: ${a.purpose || "Advance"}`,
-        details: `Method: ${a.paymentMethod}${a.referenceNumber ? ` · Ref: ${a.referenceNumber}` : ""}`,
-        amount: Number(a.amount) || 0,
-        status: a.status,
-        rawAdvance: a
-      })),
-      ...empAdvanceExpenses.map(e => ({
-        id: e.id,
-        date: e.date || e.createdDate?.split("T")[0] || "",
-        type: "DEBIT" as const,
-        title: `Expense: ${e.title}`,
-        details: `Voucher: ${e.voucherNumber || "Pending"} · Paid to: ${e.vendor || "N/A"}`,
-        amount: Number(e.totalAmount || e.amount) || 0,
-        status: e.status,
-        rawExpense: e
-      }))
-    ];
+    if (empAdvances.length === 0) return [];
 
-    // Sort chronologically ascending to compute running balance accurately
-    entries.sort((a, b) => a.date.localeCompare(b.date));
+    // 2. Collect advance-funded expenses, chronological
+    const empAdvanceExpenses = expenses
+      .filter(e =>
+        isAdvancePaymentMethod(e.paymentMethod, e.paymentSource) &&
+        ((e.employeeEmail && e.employeeEmail.toLowerCase() === targetEmp.email.toLowerCase()) ||
+         (e.employeeId && e.employeeId.toLowerCase() === targetEmp.employeeId.toLowerCase()) ||
+         (e.employeeName && e.employeeName.toLowerCase() === targetEmp.name.toLowerCase()))
+      )
+      .sort((a, b) => {
+        const da = a.date || a.createdDate?.split("T")[0] || "";
+        const db = b.date || b.createdDate?.split("T")[0] || "";
+        return da.localeCompare(db);
+      });
 
-    let runningBal = 0;
-    const ledgerWithBalance = entries.map(item => {
-      if (item.type === "CREDIT") {
-        if (item.status !== "cancelled") {
-          runningBal += item.amount;
-        }
-      } else {
-        // Only approved or reimbursed claims deduct from running balance
-        if (item.status === "approved" || item.status === "reimbursed") {
-          runningBal -= item.amount;
+    // 3. Build empty buckets for every advance
+    const buckets: AdvanceBucket[] = empAdvances.map((adv, idx) => ({
+      advance: adv,
+      advanceIndex: idx + 1,
+      advanceAmount: Number(adv.amount) || 0,
+      spentInBucket: 0,
+      remainingInBucket: Number(adv.amount) || 0,
+      isFullyUsed: false,
+      isCancelled: adv.status === "cancelled",
+      rows: []
+    }));
+
+    // 4. Walk expenses and assign to buckets sequentially
+    //    Only approved/reimbursed expenses consume the balance.
+    let bucketIdx = 0;
+
+    // Skip any leading cancelled buckets
+    while (bucketIdx < buckets.length && buckets[bucketIdx].isCancelled) bucketIdx++;
+
+    for (const exp of empAdvanceExpenses) {
+      const amt = Number(exp.totalAmount || exp.amount) || 0;
+      const isApproved = exp.status === "approved" || exp.status === "reimbursed";
+
+      // If approved, advance the bucket pointer as needed
+      if (isApproved && bucketIdx < buckets.length) {
+        // Advance to next non-cancelled bucket if current is fully used
+        while (
+          bucketIdx < buckets.length &&
+          (buckets[bucketIdx].isCancelled || buckets[bucketIdx].remainingInBucket <= 0)
+        ) {
+          if (!buckets[bucketIdx].isCancelled && buckets[bucketIdx].remainingInBucket <= 0) {
+            buckets[bucketIdx].isFullyUsed = true;
+          }
+          bucketIdx++;
         }
       }
-      return {
-        ...item,
-        balanceAfter: runningBal
-      };
-    });
 
-    // Reverse for displaying newest first
-    return ledgerWithBalance.reverse();
+      if (bucketIdx >= buckets.length) {
+        // All buckets exhausted — attach to the last non-cancelled bucket for display
+        const lastIdx = buckets.map(b => b.isCancelled).lastIndexOf(false);
+        if (lastIdx !== -1) {
+          const b = buckets[lastIdx];
+          if (isApproved) b.spentInBucket += amt;
+          const runBal = Math.max(0, b.advanceAmount - b.spentInBucket);
+          b.rows.push({
+            expense: exp,
+            date: exp.date || exp.createdDate?.split("T")[0] || "",
+            title: `Expense: ${exp.title}`,
+            details: `Voucher: ${exp.voucherNumber || "Pending"} · Paid to: ${exp.vendor || "N/A"}`,
+            amount: amt,
+            status: exp.status,
+            runningBalanceInBucket: runBal
+          });
+        }
+        continue;
+      }
+
+      const bucket = buckets[bucketIdx];
+      if (isApproved) {
+        bucket.spentInBucket += amt;
+        bucket.remainingInBucket = Math.max(0, bucket.advanceAmount - bucket.spentInBucket);
+      }
+
+      bucket.rows.push({
+        expense: exp,
+        date: exp.date || exp.createdDate?.split("T")[0] || "",
+        title: `Expense: ${exp.title}`,
+        details: `Voucher: ${exp.voucherNumber || "Pending"} · Paid to: ${exp.vendor || "N/A"}`,
+        amount: amt,
+        status: exp.status,
+        runningBalanceInBucket: bucket.remainingInBucket
+      });
+    }
+
+    // 5. Mark fully-used buckets
+    for (const b of buckets) {
+      if (!b.isCancelled && b.remainingInBucket <= 0 && b.spentInBucket >= b.advanceAmount) {
+        b.isFullyUsed = true;
+      }
+    }
+
+    return buckets;
   };
 
   return (
@@ -444,158 +510,178 @@ export default function AdvanceManagement({ user, refreshTrigger, onNavigateToSu
             </div>
           </div>
 
-          {/* History Sub-tabs (Receipts vs Expenses) */}
-          <div className="bg-white rounded-3xl border border-slate-100 p-5 sm:p-6 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab("receipts")}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                    activeSubTab === "receipts"
-                      ? "bg-indigo-600 text-white shadow-xs"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  <ArrowDownLeft className="h-3.5 w-3.5" />
-                  <span>Advance Receipts ({myAdvances.length})</span>
-                </button>
+          {/* Advance Balance Statement — Grouped Per Advance */}
+          {(() => {
+            const myBuckets = buildAdvanceBuckets({
+              ...user,
+              // ensure we pass a full EmployeeProfile shape
+            } as EmployeeProfile);
 
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab("expenses")}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                    activeSubTab === "expenses"
-                      ? "bg-indigo-600 text-white shadow-xs"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                  }`}
-                >
-                  <ArrowUpRight className="h-3.5 w-3.5" />
-                  <span>Advance-Funded Expenses ({myAdvanceExpenses.length})</span>
-                </button>
-              </div>
-
-              <span className="text-xs text-slate-400 font-medium">
-                {activeSubTab === "receipts" ? "All company advance payments credited to you" : "Claims filed using advance funds"}
-              </span>
-            </div>
-
-            {/* Sub-tab 1: Advance Receipts */}
-            {activeSubTab === "receipts" && (
-              myAdvances.length === 0 ? (
-                <div className="py-12 text-center text-slate-400 space-y-2">
+            if (myBuckets.length === 0) {
+              return (
+                <div className="bg-white rounded-3xl border border-slate-100 p-10 shadow-sm text-center text-slate-400 space-y-2">
                   <Wallet className="h-8 w-8 mx-auto text-slate-300" />
                   <p className="text-sm font-semibold">No advance payments have been issued yet.</p>
                   <p className="text-xs">When the Admin issues an advance payment, it will appear here automatically.</p>
                 </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
-                        <th className="py-3 px-3">Date</th>
-                        <th className="py-3 px-3">Purpose / Description</th>
-                        <th className="py-3 px-3">Payment Method</th>
-                        <th className="py-3 px-3">Ref / Txn No.</th>
-                        <th className="py-3 px-3 text-right">Amount</th>
-                        <th className="py-3 px-3 text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {myAdvances.map((adv) => (
-                        <tr key={adv.id} className="hover:bg-slate-50/60">
-                          <td className="py-3 px-3 font-mono font-medium text-slate-600 whitespace-nowrap">
-                            {adv.paymentDate || adv.createdAt?.split("T")[0]}
-                          </td>
-                          <td className="py-3 px-3 font-bold text-slate-800">
-                            {adv.purpose || "Advance"}
-                          </td>
-                          <td className="py-3 px-3 text-slate-600 whitespace-nowrap">
-                            <span className="px-2 py-0.5 bg-slate-100 rounded-md text-[10px] font-semibold text-slate-700">
-                              {adv.paymentMethod}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 font-mono text-slate-500 text-[11px] whitespace-nowrap">
-                            {adv.referenceNumber || "—"}
-                          </td>
-                          <td className="py-3 px-3 text-right font-black font-mono text-emerald-700 text-sm whitespace-nowrap">
-                            +₹{Number(adv.amount).toFixed(2)}
-                          </td>
-                          <td className="py-3 px-3 text-center whitespace-nowrap">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              adv.status === "cancelled" 
-                                ? "bg-rose-50 text-rose-700 border border-rose-200" 
-                                : "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                            }`}>
-                              {adv.status === "cancelled" ? "Cancelled" : "Active"}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )
-            )}
+              );
+            }
 
-            {/* Sub-tab 2: Advance Expenses */}
-            {activeSubTab === "expenses" && (
-              myAdvanceExpenses.length === 0 ? (
-                <div className="py-12 text-center text-slate-400 space-y-2">
-                  <Receipt className="h-8 w-8 mx-auto text-slate-300" />
-                  <p className="text-sm font-semibold">No SW advance-funded claims submitted yet.</p>
-                  <p className="text-xs">Choose "Deduct from SW Advance" under SW Payment when submitting a new expense to deduct from your advance balance.</p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
-                        <th className="py-3 px-3">Date</th>
-                        <th className="py-3 px-3">Voucher</th>
-                        <th className="py-3 px-3">Title / Description</th>
-                        <th className="py-3 px-3">Paid to</th>
-                        <th className="py-3 px-3 text-right">Claim Amount</th>
-                        <th className="py-3 px-3 text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {myAdvanceExpenses.map((exp) => (
-                        <tr key={exp.id} className="hover:bg-slate-50/60">
-                          <td className="py-3 px-3 font-mono font-medium text-slate-600 whitespace-nowrap">
-                            {exp.date}
-                          </td>
-                          <td className="py-3 px-3 font-mono font-bold text-indigo-600 whitespace-nowrap">
-                            {exp.voucherNumber || "—"}
-                          </td>
-                          <td className="py-3 px-3 font-bold text-slate-800">
-                            {exp.title}
-                          </td>
-                          <td className="py-3 px-3 text-slate-600 whitespace-nowrap">
-                            {exp.vendor || "—"}
-                          </td>
-                          <td className="py-3 px-3 text-right font-black font-mono text-purple-700 text-sm whitespace-nowrap">
-                            -₹{Number(exp.totalAmount || exp.amount).toFixed(2)}
-                          </td>
-                          <td className="py-3 px-3 text-center whitespace-nowrap">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              exp.status === "approved" || exp.status === "reimbursed"
-                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                : exp.status === "rejected"
-                                ? "bg-rose-50 text-rose-700 border border-rose-200"
-                                : "bg-amber-50 text-amber-700 border border-amber-200"
+            return (
+              <div className="space-y-4">
+                {myBuckets.map((bucket) => {
+                  const usagePct = bucket.advanceAmount > 0
+                    ? Math.min(100, (bucket.spentInBucket / bucket.advanceAmount) * 100)
+                    : 0;
+
+                  return (
+                    <div
+                      key={bucket.advance.id}
+                      className={`rounded-3xl border shadow-sm overflow-hidden ${
+                        bucket.isCancelled
+                          ? "border-slate-200 bg-slate-50/60 opacity-60"
+                          : bucket.isFullyUsed
+                          ? "border-emerald-200 bg-emerald-50/30"
+                          : "border-indigo-200 bg-white"
+                      }`}
+                    >
+                      {/* Advance Header Row */}
+                      <div className={`px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                        bucket.isCancelled
+                          ? "bg-slate-100/60"
+                          : bucket.isFullyUsed
+                          ? "bg-emerald-600"
+                          : "bg-indigo-600"
+                      }`}>
+                        <div className="flex items-center gap-3">
+                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-sm shadow-xs ${
+                            bucket.isCancelled ? "bg-slate-200 text-slate-500" : "bg-white/20 text-white"
+                          }`}>
+                            #{bucket.advanceIndex}
+                          </div>
+                          <div>
+                            <span className={`block text-sm font-black ${
+                              bucket.isCancelled ? "text-slate-500" : "text-white"
                             }`}>
-                              {exp.status === "approved" || exp.status === "reimbursed" ? "Deducted (Approved)" : exp.status === "rejected" ? "Rejected (No Deduction)" : "Pending Approval"}
+                              Advance #{bucket.advanceIndex}: ₹{bucket.advanceAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                             </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )
-            )}
-          </div>
+                            <span className={`block text-[11px] font-medium ${
+                              bucket.isCancelled ? "text-slate-400" : "text-white/70"
+                            }`}>
+                              Paid on {bucket.advance.paymentDate || bucket.advance.createdAt?.split("T")[0] || "—"}
+                              {bucket.advance.purpose ? ` · ${bucket.advance.purpose}` : ""}
+                              {bucket.advance.paymentMethod ? ` · ${bucket.advance.paymentMethod}` : ""}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {bucket.isCancelled ? (
+                            <span className="px-3 py-1 rounded-full bg-slate-200 text-slate-600 text-[10px] font-black uppercase tracking-wider">
+                              Cancelled
+                            </span>
+                          ) : bucket.isFullyUsed ? (
+                            <span className="px-3 py-1 rounded-full bg-white/20 text-white text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                              <CheckCircle2 className="h-3 w-3" /> Fully Used
+                            </span>
+                          ) : (
+                            <span className="px-3 py-1 rounded-full bg-white/20 text-white text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              ₹{bucket.remainingInBucket.toLocaleString("en-IN", { minimumFractionDigits: 2 })} left
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Usage Progress Bar */}
+                      {!bucket.isCancelled && (
+                        <div className="px-5 pt-3 pb-1">
+                          <div className="flex items-center justify-between text-[10px] font-bold mb-1">
+                            <span className="text-slate-400">Spent: ₹{bucket.spentInBucket.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                            <span className={bucket.isFullyUsed ? "text-emerald-700" : "text-indigo-600"}>{usagePct.toFixed(0)}% used</span>
+                          </div>
+                          <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                bucket.isFullyUsed ? "bg-emerald-500" : "bg-indigo-500"
+                              }`}
+                              style={{ width: `${usagePct}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Expenses within this advance */}
+                      <div className="px-5 pb-4 pt-2">
+                        {bucket.rows.length === 0 ? (
+                          <div className="py-6 text-center text-slate-400 text-xs italic">
+                            No expenses claimed against this advance yet.
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto mt-2">
+                            <table className="w-full text-left text-xs border-collapse">
+                              <thead>
+                                <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                                  <th className="py-2 px-3">Date</th>
+                                  <th className="py-2 px-3">Title</th>
+                                  <th className="py-2 px-3">Voucher</th>
+                                  <th className="py-2 px-3">Vendor</th>
+                                  <th className="py-2 px-3 text-right">Amount</th>
+                                  <th className="py-2 px-3 text-right">Balance Left</th>
+                                  <th className="py-2 px-3 text-center">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100">
+                                {bucket.rows.map((row) => (
+                                  <tr key={row.expense.id} className="hover:bg-slate-50/60">
+                                    <td className="py-2.5 px-3 font-mono text-slate-500 whitespace-nowrap">{row.date}</td>
+                                    <td className="py-2.5 px-3 font-bold text-slate-800">{row.expense.title}</td>
+                                    <td className="py-2.5 px-3 font-mono text-indigo-600 whitespace-nowrap">{row.expense.voucherNumber || "—"}</td>
+                                    <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">{row.expense.vendor || "—"}</td>
+                                    <td className="py-2.5 px-3 text-right font-black font-mono whitespace-nowrap">
+                                      <span className={
+                                        row.status === "approved" || row.status === "reimbursed"
+                                          ? "text-purple-700"
+                                          : row.status === "rejected"
+                                          ? "line-through text-slate-400"
+                                          : "text-amber-700"
+                                      }>
+                                        -₹{row.amount.toFixed(2)}
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-mono font-black text-slate-800 whitespace-nowrap">
+                                      {(row.status === "approved" || row.status === "reimbursed")
+                                        ? `₹${row.runningBalanceInBucket.toFixed(2)}`
+                                        : <span className="text-slate-300">—</span>}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                        row.status === "approved" || row.status === "reimbursed"
+                                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                          : row.status === "rejected"
+                                          ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                          : "bg-amber-50 text-amber-700 border border-amber-200"
+                                      }`}>
+                                        {row.status === "approved" || row.status === "reimbursed"
+                                          ? "Deducted"
+                                          : row.status === "rejected"
+                                          ? "Rejected"
+                                          : "Pending"}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       ) : (
         /* ========================================================= */
@@ -1056,95 +1142,181 @@ export default function AdvanceManagement({ user, refreshTrigger, onNavigateToSu
                 );
               })()}
 
-              {/* Statement Chronological Ledger */}
-              <div className="flex-1 overflow-y-auto p-5">
+              {/* Statement: Grouped Per-Advance Buckets */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-4">
                 {(() => {
-                  const statementLedger = buildEmployeeStatement(statementEmployee);
-                  if (statementLedger.length === 0) {
+                  const buckets = buildAdvanceBuckets(statementEmployee);
+
+                  if (buckets.length === 0) {
                     return (
                       <div className="py-12 text-center text-slate-400 italic text-xs">
                         No advance credits or deductions recorded yet for this employee.
                       </div>
                     );
                   }
-                  return (
-                    <table className="w-full text-left text-xs border-collapse">
-                      <thead>
-                        <tr className="border-b border-slate-200 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
-                          <th className="py-2.5 px-3">Date</th>
-                          <th className="py-2.5 px-3">Transaction Details</th>
-                          <th className="py-2.5 px-3 text-right">Credit / Debit</th>
-                          <th className="py-2.5 px-3 text-right">Running Balance</th>
-                          <th className="py-2.5 px-3 text-center">Status</th>
-                          {user.role === "admin" && <th className="py-2.5 px-3 text-center">Action</th>}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {statementLedger.map((item) => (
-                          <tr key={item.id} className="hover:bg-slate-50/70 transition">
-                            <td className="py-3 px-3 font-mono text-slate-500 font-medium whitespace-nowrap">
-                              {item.date}
-                            </td>
-                            <td className="py-3 px-3">
-                              <span className="block font-bold text-slate-800">{item.title}</span>
-                              <span className="block text-[10px] text-slate-400 mt-0.5">{item.details}</span>
-                            </td>
-                            <td className="py-3 px-3 text-right font-mono font-bold whitespace-nowrap">
-                              {item.type === "CREDIT" ? (
-                                <span className={item.status === "cancelled" ? "line-through text-slate-400" : "text-emerald-600"}>
-                                  +₹{item.amount.toFixed(2)}
-                                </span>
-                              ) : (
-                                <span className={item.status === "approved" || item.status === "reimbursed" ? "text-purple-600" : "text-slate-400 italic"}>
-                                  -₹{item.amount.toFixed(2)}
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-3 text-right font-mono font-black text-slate-800 whitespace-nowrap">
-                              ₹{item.balanceAfter.toFixed(2)}
-                            </td>
-                            <td className="py-3 px-3 text-center whitespace-nowrap">
-                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                                item.status === "cancelled"
-                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
-                                  : item.status === "approved" || item.status === "reimbursed"
-                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                  : item.status === "rejected"
-                                  ? "bg-rose-50 text-rose-700 border border-rose-200"
-                                  : item.type === "CREDIT"
-                                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                  : "bg-amber-50 text-amber-700 border border-amber-200"
+
+                  return buckets.map((bucket) => {
+                    const usagePct = bucket.advanceAmount > 0
+                      ? Math.min(100, (bucket.spentInBucket / bucket.advanceAmount) * 100)
+                      : 0;
+
+                    return (
+                      <div
+                        key={bucket.advance.id}
+                        className={`rounded-2xl border overflow-hidden ${
+                          bucket.isCancelled
+                            ? "border-slate-200 bg-slate-50/60 opacity-60"
+                            : bucket.isFullyUsed
+                            ? "border-emerald-200"
+                            : "border-indigo-200"
+                        }`}
+                      >
+                        {/* Advance Header */}
+                        <div className={`px-4 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+                          bucket.isCancelled
+                            ? "bg-slate-100"
+                            : bucket.isFullyUsed
+                            ? "bg-emerald-600"
+                            : "bg-indigo-600"
+                        }`}>
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
+                              bucket.isCancelled ? "bg-slate-200 text-slate-500" : "bg-white/20 text-white"
+                            }`}>
+                              #{bucket.advanceIndex}
+                            </div>
+                            <div className="min-w-0">
+                              <span className={`block text-sm font-black truncate ${
+                                bucket.isCancelled ? "text-slate-500" : "text-white"
                               }`}>
-                                {item.status === "approved" || item.status === "reimbursed" 
-                                  ? "Deducted" 
-                                  : item.status === "rejected"
-                                  ? "Rejected"
-                                  : item.type === "CREDIT" && item.status !== "cancelled"
-                                  ? "Credited"
-                                  : item.status === "cancelled"
-                                  ? "Cancelled"
-                                  : "Pending Approval"}
+                                Advance #{bucket.advanceIndex} — ₹{bucket.advanceAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                               </span>
-                            </td>
-                            {user.role === "admin" && (
-                              <td className="py-3 px-3 text-center whitespace-nowrap">
-                                {item.type === "CREDIT" && item.rawAdvance && item.status !== "cancelled" && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleCancelAdvance(item.rawAdvance!)}
-                                    className="px-2 py-0.5 text-[10px] font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-lg transition cursor-pointer"
-                                    title="Cancel this advance payment"
-                                  >
-                                    Cancel
-                                  </button>
-                                )}
-                              </td>
+                              <span className={`block text-[10px] font-medium ${
+                                bucket.isCancelled ? "text-slate-400" : "text-white/70"
+                              }`}>
+                                {bucket.advance.paymentDate || bucket.advance.createdAt?.split("T")[0] || "—"}
+                                {bucket.advance.purpose ? ` · ${bucket.advance.purpose}` : ""}
+                                {bucket.advance.paymentMethod ? ` · ${bucket.advance.paymentMethod}` : ""}
+                                {bucket.advance.referenceNumber ? ` · Ref: ${bucket.advance.referenceNumber}` : ""}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {/* Admin Cancel Button */}
+                            {user.role === "admin" && !bucket.isCancelled && (
+                              <button
+                                type="button"
+                                onClick={() => handleCancelAdvance(bucket.advance)}
+                                className="px-2.5 py-1 text-[10px] font-bold text-white/80 hover:text-white border border-white/30 hover:border-white/60 rounded-lg transition cursor-pointer"
+                                title="Cancel this advance payment"
+                              >
+                                Cancel
+                              </button>
                             )}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  );
+
+                            {bucket.isCancelled ? (
+                              <span className="px-2.5 py-1 rounded-full bg-slate-200 text-slate-500 text-[10px] font-black uppercase tracking-wider">
+                                Cancelled
+                              </span>
+                            ) : bucket.isFullyUsed ? (
+                              <span className="px-2.5 py-1 rounded-full bg-white/20 text-white text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                                <CheckCircle2 className="h-3 w-3" /> Fully Used
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-full bg-white/20 text-white text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                ₹{bucket.remainingInBucket.toLocaleString("en-IN", { minimumFractionDigits: 2 })} left
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Progress Bar */}
+                        {!bucket.isCancelled && (
+                          <div className="px-4 pt-2.5 pb-1 bg-white border-b border-slate-100">
+                            <div className="flex items-center justify-between text-[10px] font-bold mb-1">
+                              <span className="text-slate-400">Spent: ₹{bucket.spentInBucket.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                              <span className={bucket.isFullyUsed ? "text-emerald-700" : "text-indigo-600"}>{usagePct.toFixed(0)}% used</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  bucket.isFullyUsed ? "bg-emerald-500" : "bg-indigo-500"
+                                }`}
+                                style={{ width: `${usagePct}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Expenses within this advance bucket */}
+                        <div className="bg-white px-4 pb-3">
+                          {bucket.rows.length === 0 ? (
+                            <div className="py-5 text-center text-slate-400 text-xs italic">
+                              No expenses claimed against this advance yet.
+                            </div>
+                          ) : (
+                            <table className="w-full text-left text-xs border-collapse mt-2">
+                              <thead>
+                                <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                                  <th className="py-2 px-2">Date</th>
+                                  <th className="py-2 px-2">Title</th>
+                                  <th className="py-2 px-2">Voucher</th>
+                                  <th className="py-2 px-2">Vendor</th>
+                                  <th className="py-2 px-2 text-right">Amount</th>
+                                  <th className="py-2 px-2 text-right">Balance Left</th>
+                                  <th className="py-2 px-2 text-center">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50">
+                                {bucket.rows.map((row) => (
+                                  <tr key={row.expense.id} className="hover:bg-slate-50/70 transition">
+                                    <td className="py-2.5 px-2 font-mono text-slate-500 whitespace-nowrap">{row.date}</td>
+                                    <td className="py-2.5 px-2 font-bold text-slate-800">{row.expense.title}</td>
+                                    <td className="py-2.5 px-2 font-mono text-indigo-600 whitespace-nowrap">{row.expense.voucherNumber || "—"}</td>
+                                    <td className="py-2.5 px-2 text-slate-500 whitespace-nowrap">{row.expense.vendor || "—"}</td>
+                                    <td className="py-2.5 px-2 text-right font-black font-mono whitespace-nowrap">
+                                      <span className={
+                                        row.status === "approved" || row.status === "reimbursed"
+                                          ? "text-purple-700"
+                                          : row.status === "rejected"
+                                          ? "line-through text-slate-400"
+                                          : "text-amber-600"
+                                      }>
+                                        -₹{row.amount.toFixed(2)}
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 px-2 text-right font-mono font-black whitespace-nowrap">
+                                      {(row.status === "approved" || row.status === "reimbursed")
+                                        ? <span className="text-slate-800">₹{row.runningBalanceInBucket.toFixed(2)}</span>
+                                        : <span className="text-slate-300">—</span>
+                                      }
+                                    </td>
+                                    <td className="py-2.5 px-2 text-center whitespace-nowrap">
+                                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                        row.status === "approved" || row.status === "reimbursed"
+                                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                          : row.status === "rejected"
+                                          ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                          : "bg-amber-50 text-amber-700 border border-amber-200"
+                                      }`}>
+                                        {row.status === "approved" || row.status === "reimbursed"
+                                          ? "Deducted"
+                                          : row.status === "rejected"
+                                          ? "Rejected"
+                                          : "Pending"}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  });
                 })()}
               </div>
 

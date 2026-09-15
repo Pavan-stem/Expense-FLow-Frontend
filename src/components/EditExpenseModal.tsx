@@ -394,6 +394,13 @@ export default function EditExpenseModal({
       return;
     }
 
+    // Bill upload is mandatory when payment mode is UPI or UPI+Cash
+    const totalBills = existingBills.length + newBills.length;
+    if ((paymentSubMode === "UPI" || paymentSubMode === "UPI+Cash") && totalBills === 0) {
+      setAlertMsg({ type: "error", text: `Bill upload is mandatory when payment mode is "${paymentSubMode}". Please attach the payment receipt or transaction screenshot.` });
+      return;
+    }
+
     setSubmitting(true);
     setAlertMsg(null);
 
@@ -726,11 +733,24 @@ export default function EditExpenseModal({
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   <FileText className="h-3.5 w-3.5 text-indigo-600" /> Attached Receipts & Bills
+                  {(paymentSubMode === "UPI" || paymentSubMode === "UPI+Cash") && (
+                    <span className="ml-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 uppercase tracking-wider">
+                      Required
+                    </span>
+                  )}
                 </span>
                 <span className="text-[10px] text-slate-400 font-normal">
                   ({existingBills.length + newBills.length} File(s))
                 </span>
               </label>
+
+              {/* Mandatory bill notice for UPI / UPI+Cash */}
+              {(paymentSubMode === "UPI" || paymentSubMode === "UPI+Cash") && (existingBills.length + newBills.length) === 0 && (
+                <div className="flex items-center gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+                  <AlertCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                  <span><strong>Bill upload required:</strong> UPI/UPI+Cash payments must have a receipt or transaction screenshot attached before saving.</span>
+                </div>
+              )}
 
               {/* Existing Bills List */}
               {existingBills.length > 0 && (
@@ -830,7 +850,9 @@ export default function EditExpenseModal({
                   className={`border-2 border-dashed rounded-2xl p-4 text-center transition cursor-pointer ${
                     isDragActive
                       ? "border-indigo-500 bg-indigo-50/50"
-                      : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/60"
+                      : (paymentSubMode === "UPI" || paymentSubMode === "UPI+Cash") && (existingBills.length + newBills.length) === 0
+                        ? "border-rose-300 bg-rose-50/40 hover:bg-rose-50/60"
+                        : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/60"
                   }`}
                 >
                   <input
