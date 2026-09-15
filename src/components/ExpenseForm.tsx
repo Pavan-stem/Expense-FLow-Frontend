@@ -58,7 +58,9 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
       unsubA();
       unsubE();
     };
-  }, [user]);
+    // Use stable primitive identifiers instead of the whole user object to avoid
+    // re-running the effect whenever the parent renders a new object reference.
+  }, [user.employeeId, user.email, user.name]);
 
   const [uploadedBills, setUploadedBills] = useState<BillFile[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);

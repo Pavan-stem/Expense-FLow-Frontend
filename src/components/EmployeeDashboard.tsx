@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { 
   getExpensesByEmployee, 
   subscribeToAdvances,
@@ -49,11 +49,16 @@ export default function EmployeeDashboard({ user, onNavigateToSubmit, onNavigate
     pendingAdvanceAmount: 0
   });
 
+  // Keep a stable ref to latest expenses so the advance subscription
+  // callback doesn't capture a stale snapshot and trigger infinite loops
+  const expensesRef = useRef<Expense[]>([]);
+
   useEffect(() => {
     const fetchExpenses = async () => {
       setLoading(true);
       try {
         const data = await getExpensesByEmployee(user.employeeId);
+        expensesRef.current = data;
         setExpenses(data);
       } catch (err) {
         console.error(err);
@@ -64,11 +69,13 @@ export default function EmployeeDashboard({ user, onNavigateToSubmit, onNavigate
     fetchExpenses();
 
     const unsubAdv = subscribeToAdvances((advs) => {
-      setAdvanceSummary(prev => calculateAdvanceSummary(user.employeeId, advs, expenses, user.email, user.name));
+      setAdvanceSummary(calculateAdvanceSummary(user.employeeId, advs, expensesRef.current, user.email, user.name));
     });
 
     return () => unsubAdv();
-  }, [user, refreshTrigger, expenses.length]);
+    // Only re-run when stable user identifiers or refreshTrigger changes.
+    // DO NOT add `expenses` or `expenses.length` here — that causes an infinite loop.
+  }, [user.employeeId, user.email, user.name, refreshTrigger]);
 
   const now = new Date();
   const currentMonthIdx = now.getMonth();
