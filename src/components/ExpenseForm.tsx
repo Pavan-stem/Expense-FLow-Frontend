@@ -57,7 +57,7 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
       unsubA();
       unsubE();
     };
-  }, [user]);
+  }, [user.employeeId, user.email, user.name]);
 
   const [uploadedBills, setUploadedBills] = useState<BillFile[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);

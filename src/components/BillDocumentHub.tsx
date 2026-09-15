@@ -62,8 +62,8 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
 
   // Filters
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>("all");
-  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toLocaleString("default", { month: "long" }));
-  const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
+  const [selectedMonth, setSelectedMonth] = useState<string>("All");
+  const [selectedYear, setSelectedYear] = useState<string>("All");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [gridDensity, setGridDensity] = useState<9 | 12>(9); // 9 or 12 images per document sheet
   const [selectedDay, setSelectedDay] = useState<string>(""); // "" = full month, "YYYY-MM-DD" = specific day
@@ -185,15 +185,26 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
     if (isAdmin && selectedEmployeeId !== "all" && exp.employeeId !== selectedEmployeeId) {
       return false;
     }
-    // Year filter
-    if (selectedYear !== "All") {
-      const expYear = new Date(exp.date).getFullYear().toString();
-      if (expYear !== selectedYear) return false;
-    }
-    // Month filter
-    if (selectedMonth !== "All") {
-      const expMonth = new Date(exp.date).toLocaleString("default", { month: "long" });
-      if (expMonth !== selectedMonth) return false;
+    // Year & Month filter (Timezone-safe parsing to avoid UTC date shifting)
+    if (selectedYear !== "All" || selectedMonth !== "All") {
+      let expMonth = "";
+      let expYear = "";
+      if (exp.date && exp.date.includes("-")) {
+        const parts = exp.date.split("-");
+        if (parts.length === 3) {
+          const localDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+          expMonth = localDate.toLocaleString("default", { month: "long" });
+          expYear = localDate.getFullYear().toString();
+        }
+      }
+      if (!expMonth) {
+        const d = new Date(exp.date);
+        expMonth = d.toLocaleString("default", { month: "long" });
+        expYear = d.getFullYear().toString();
+      }
+
+      if (selectedYear !== "All" && expYear !== selectedYear) return false;
+      if (selectedMonth !== "All" && expMonth !== selectedMonth) return false;
     }
 
     return true;
