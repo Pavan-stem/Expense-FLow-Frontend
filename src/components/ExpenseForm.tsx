@@ -22,7 +22,6 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
   // Form State
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [amount, setAmount] = useState("");
-  const [rawExpression, setRawExpression] = useState("");
   const [vendor, setVendor] = useState("");
   const [paymentType, setPaymentType] = useState<"Personal Payment" | "SW Payment">("Personal Payment");
   const [swPaymentMode, setSwPaymentMode] = useState<"advance" | "direct">("advance");
@@ -58,9 +57,7 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
       unsubA();
       unsubE();
     };
-    // Use stable primitive identifiers instead of the whole user object to avoid
-    // re-running the effect whenever the parent renders a new object reference.
-  }, [user.employeeId, user.email, user.name]);
+  }, [user]);
 
   const [uploadedBills, setUploadedBills] = useState<BillFile[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -378,12 +375,6 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
       return;
     }
 
-    // Bill upload is mandatory when payment mode is UPI or UPI+Cash
-    if ((paymentSubMode === "UPI" || paymentSubMode === "UPI+Cash") && uploadedBills.length === 0) {
-      setMessage({ type: "error", text: `Bill upload is mandatory when payment mode is "${paymentSubMode}". Please attach the payment receipt or transaction screenshot.` });
-      return;
-    }
-
     setSubmitting(true);
     setMessage(null);
 
@@ -412,7 +403,6 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
 
       // Clear Form on success
       setAmount("");
-      setRawExpression("");
       setVendor("");
       setPaymentType("Personal Payment");
       setPaymentSubMode("");
@@ -586,16 +576,7 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
                 type="text"
                 required
                 value={amount}
-                onChange={(e) => {
-                  setAmount(e.target.value);
-                  setRawExpression(e.target.value);
-                }}
-                onFocus={() => {
-                  // Restore original expression when the user clicks in so they can see the individual amounts
-                  if (rawExpression && rawExpression !== amount) {
-                    setAmount(rawExpression);
-                  }
-                }}
+                onChange={(e) => setAmount(e.target.value)}
                 onBlur={() => {
                   if (parsedAmount > 0 && /[+*/-]/.test(amount)) {
                     setAmount(parsedAmount.toString());
@@ -755,27 +736,13 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
           {/* Drag & Drop File Upload */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">
-                Supporting Bills/Invoices (PDF, JPG, PNG)
-                {(paymentSubMode === "UPI" || paymentSubMode === "UPI+Cash") && (
-                  <span className="ml-2 text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 uppercase tracking-wider">
-                    Required
-                  </span>
-                )}
-              </label>
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Supporting Bills/Invoices (PDF, JPG, PNG)</label>
               {uploadedBills.length > 0 && (
                 <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
                   {uploadedBills.length} File{uploadedBills.length > 1 ? "s" : ""} Attached
                 </span>
               )}
             </div>
-            {/* Mandatory bill notice for UPI / UPI+Cash */}
-            {(paymentSubMode === "UPI" || paymentSubMode === "UPI+Cash") && uploadedBills.length === 0 && (
-              <div className="flex items-center gap-2 p-2.5 bg-amber-50 border border-amber-200 rounded-xl mb-2 text-xs text-amber-800">
-                <AlertTriangle className="h-4 w-4 text-amber-500 flex-shrink-0" />
-                <span><strong>Bill upload required:</strong> UPI/UPI+Cash payments must have a receipt or transaction screenshot attached before submitting.</span>
-              </div>
-            )}
             <div
               id="form-drag-drop-zone"
               onDragEnter={handleDrag}
@@ -787,13 +754,10 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
                   document.getElementById("hidden-file-input")?.click();
                 }
               }}
-              className={`border-2 border-dashed rounded-2xl p-6 text-center flex flex-col items-center justify-center transition cursor-pointer ${
-                isDragActive
-                  ? "border-indigo-500 bg-indigo-50/40"
-                  : (paymentSubMode === "UPI" || paymentSubMode === "UPI+Cash") && uploadedBills.length === 0
-                    ? "border-rose-300 bg-rose-50/40 hover:bg-rose-50/60"
-                    : "border-slate-200 bg-slate-50 hover:bg-slate-100/60"
-              }`}
+              className={`border-2 border-dashed rounded-2xl p-6 text-center flex flex-col items-center justify-center transition cursor-pointer ${isDragActive
+                ? "border-indigo-500 bg-indigo-50/40"
+                : "border-slate-200 bg-slate-50 hover:bg-slate-100/60"
+                }`}
             >
               {isProcessingFiles ? (
                 <div className="flex flex-col items-center py-2">
