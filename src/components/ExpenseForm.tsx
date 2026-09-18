@@ -9,7 +9,7 @@ import {
   type BillFile,
   type Expense
 } from "../lib/firebase";
-import { Upload, FileText, Image, Trash2, X, AlertTriangle, Sparkles, Receipt, Coins, Eye, ZoomIn, ZoomOut, RotateCcw, RotateCw, RefreshCw, Calculator, Loader2, Plus, ChevronLeft, ChevronRight, UserCheck, Building2, Wallet, CheckCircle2 } from "lucide-react";
+import { Upload, FileText, Image, Trash2, X, AlertTriangle, AlertCircle, Sparkles, Receipt, Coins, Eye, ZoomIn, ZoomOut, RotateCcw, RotateCw, RefreshCw, Calculator, Loader2, Plus, ChevronLeft, ChevronRight, UserCheck, Building2, Wallet, CheckCircle2 } from "lucide-react";
 
 import { motion, AnimatePresence } from "motion/react";
 
@@ -22,6 +22,8 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
   // Form State
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [amount, setAmount] = useState("");
+  const [amountExpression, setAmountExpression] = useState("");
+  const [isAmountFocused, setIsAmountFocused] = useState(false);
   const [vendor, setVendor] = useState("");
   const [paymentType, setPaymentType] = useState<"Personal Payment" | "SW Payment">("Personal Payment");
   const [swPaymentMode, setSwPaymentMode] = useState<"advance" | "direct">("advance");
@@ -29,6 +31,8 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
   const [expenseCategory, setExpenseCategory] = useState("");
   const [customCategory, setCustomCategory] = useState("");
   const [schoolLocationDetails, setSchoolLocationDetails] = useState("");
+
+  const isUpiPayment = paymentSubMode === "UPI" || paymentSubMode === "UPI+Cash";
 
   // Live Advance Balance Tracking
   const [advanceSummary, setAdvanceSummary] = useState<{
@@ -113,10 +117,13 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Math expression evaluator for Amount input (e.g. "94+94+57" -> 245)
+  // Math expression evaluator for Amount input (e.g. "100+200+450" -> 750)
   const parseAmountExpression = (expr: string): number | null => {
     if (!expr || !expr.trim()) return 0;
-    const sanitized = expr.trim().replace(/×/g, "*").replace(/÷/g, "/");
+    let sanitized = expr.trim().replace(/×/g, "*").replace(/÷/g, "/");
+    // Strip trailing operators if user is typing (e.g. "100+200+")
+    sanitized = sanitized.replace(/[+*/-]+$/, "").trim();
+    if (!sanitized) return 0;
     if (!/^[0-9+*/.() -]+$/.test(sanitized)) {
       return null;
     }
@@ -375,6 +382,18 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
       return;
     }
 
+    if (isUpiPayment && uploadedBills.length === 0) {
+      setMessage({
+        type: "error",
+        text: `Uploading a bill/receipt is mandatory when selecting ${paymentSubMode} as the payment mode. Please attach at least one bill or receipt.`
+      });
+      const uploadZone = document.getElementById("form-drag-drop-zone");
+      if (uploadZone) {
+        uploadZone.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      return;
+    }
+
     setSubmitting(true);
     setMessage(null);
 
@@ -403,6 +422,7 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
 
       // Clear Form on success
       setAmount("");
+      setAmountExpression("");
       setVendor("");
       setPaymentType("Personal Payment");
       setPaymentSubMode("");
@@ -564,10 +584,10 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Amount (₹)*</label>
-                {/[+*/-]/.test(amount) && (
+                {amountExpression && /[+*/-]/.test(amountExpression) && (
                   <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200/80 flex items-center gap-1">
                     <Calculator className="h-3 w-3 text-indigo-600" />
-                    = ₹{parsedAmount.toFixed(2)}
+                    {isAmountFocused ? `= ₹${parsedAmount.toFixed(2)}` : `${amountExpression} = ₹${parsedAmount.toFixed(2)}`}
                   </span>
                 )}
               </div>
@@ -576,21 +596,46 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
                 type="text"
                 required
                 value={amount}
-                onChange={(e) => setAmount(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setAmount(val);
+                  setAmountExpression(val);
+                }}
+                onFocus={() => {
+                  setIsAmountFocused(true);
+                  if (amountExpression && /[+*/-]/.test(amountExpression)) {
+                    setAmount(amountExpression);
+                  }
+                }}
                 onBlur={() => {
+                  setIsAmountFocused(false);
                   if (parsedAmount > 0 && /[+*/-]/.test(amount)) {
+                    setAmountExpression(amount);
                     setAmount(parsedAmount.toString());
                   }
                 }}
-                placeholder="e.g. 150.00 or 94+94+57"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    (e.target as HTMLInputElement).blur();
+                  }
+                }}
+                placeholder="e.g. 150.00 or 100+200+450"
                 className="block w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-slate-900 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm outline-none transition font-medium"
               />
-              {/[+*/-]/.test(amount) ? (
+              {amountExpression && /[+*/-]/.test(amountExpression) ? (
                 <p className="text-[10px] text-indigo-600 mt-1 font-medium flex items-center gap-1">
-                  <Calculator className="h-3 w-3" /> Auto-evaluates: {amount} = <strong>₹{parsedAmount.toFixed(2)}</strong>
+                  <Calculator className="h-3 w-3 text-indigo-500 shrink-0" />
+                  {isAmountFocused ? (
+                    <span>Auto-evaluates on blur or Enter: <strong>{amount}</strong> = <strong>₹{parsedAmount.toFixed(2)}</strong></span>
+                  ) : (
+                    <span>Addition breakdown: <strong className="font-mono bg-indigo-50 px-1 py-0.5 rounded text-indigo-800 border border-indigo-100">{amountExpression}</strong> = <strong>₹{parsedAmount.toFixed(2)}</strong> <span className="text-slate-400 font-normal">(Click box to view/edit individual additions)</span></span>
+                  )}
                 </p>
               ) : (
-                <p className="text-[10px] text-slate-400 mt-1">Tip: You can type math additions like <code className="bg-slate-100 px-1 rounded text-slate-600 font-mono">94+94+57</code> to calculate total sum automatically.</p>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Tip: You can enter additions like <code className="bg-slate-100 px-1 rounded text-slate-600 font-mono">100+200+450</code>. It evaluates to ₹750 on blur and shows the individual additions when clicked again.
+                </p>
               )}
             </div>
           </div>
@@ -720,23 +765,47 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
                 id="form-payment"
                 value={paymentSubMode}
                 onChange={(e) => setPaymentSubMode(e.target.value)}
-                className="block w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-slate-900 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm outline-none transition cursor-pointer font-medium"
+                className={`block w-full px-3.5 py-2.5 border rounded-xl text-slate-900 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm outline-none transition cursor-pointer font-medium ${
+                  isUpiPayment ? "border-amber-300 bg-amber-50/20" : "border-slate-200"
+                }`}
               >
                 <option value="">-- Select specific payment mode (optional: UPI, Cash, Card...) --</option>
-                <option value="UPI">UPI</option>
+                <option value="UPI">UPI (Bill upload mandatory)</option>
                 <option value="Cash">Cash</option>
-                <option value="UPI+Cash">UPI+Cash</option>
+                <option value="UPI+Cash">UPI+Cash (Bill upload mandatory)</option>
                 <option value="Credit Card">Credit Card</option>
                 <option value="Debit Card">Debit Card</option>
                 <option value="Bank Transfer">Bank Transfer</option>
               </select>
+
+              {isUpiPayment && (
+                <div className="mt-2.5 p-3 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-900 text-xs flex items-start gap-2.5 shadow-2xs">
+                  <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    <span className="font-bold block text-amber-950">Bill Receipt Upload Mandatory</span>
+                    <span className="text-amber-800">
+                      Uploading at least one supporting bill or receipt document is <strong>mandatory</strong> when selecting <strong>{paymentSubMode}</strong>.
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Drag & Drop File Upload */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 block">Supporting Bills/Invoices (PDF, JPG, PNG)</label>
+              <label className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5 flex-wrap">
+                <span>Supporting Bills/Invoices (PDF, JPG, PNG)</span>
+                {isUpiPayment ? (
+                  <span className="text-rose-600 font-bold normal-case text-xs bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200 flex items-center gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse"></span>
+                    Mandatory for {paymentSubMode}
+                  </span>
+                ) : (
+                  <span className="text-slate-400 font-normal normal-case text-[11px]">(Optional)</span>
+                )}
+              </label>
               {uploadedBills.length > 0 && (
                 <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
                   {uploadedBills.length} File{uploadedBills.length > 1 ? "s" : ""} Attached
@@ -756,6 +825,8 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
               }}
               className={`border-2 border-dashed rounded-2xl p-6 text-center flex flex-col items-center justify-center transition cursor-pointer ${isDragActive
                 ? "border-indigo-500 bg-indigo-50/40"
+                : isUpiPayment && uploadedBills.length === 0
+                ? "border-amber-400 bg-amber-50/30 hover:bg-amber-50/60 ring-2 ring-amber-400/20"
                 : "border-slate-200 bg-slate-50 hover:bg-slate-100/60"
                 }`}
             >
@@ -767,7 +838,15 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
                 </div>
               ) : (
                 <>
-                  <Upload className="h-8 w-8 text-indigo-500 mb-2" />
+                  {isUpiPayment && uploadedBills.length === 0 && (
+                    <div className="mb-2.5 inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-full text-xs font-bold shadow-2xs">
+                      <AlertCircle className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+                      Receipt upload is required for {paymentSubMode}
+                    </div>
+                  )}
+                  <Upload className={`h-8 w-8 mb-2 ${
+                    isUpiPayment && uploadedBills.length === 0 ? "text-amber-600" : "text-indigo-500"
+                  }`} />
                   <p className="text-xs font-bold text-slate-700">Drag & drop multiple bill images here, or click to select files</p>
                   <p className="text-[10px] text-slate-400 mt-1">Select 1 or multiple receipt photos (JPG, PNG) or PDFs at once.</p>
                   <button
@@ -777,9 +856,13 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
                       e.stopPropagation();
                       document.getElementById("hidden-file-input")?.click();
                     }}
-                    className="mt-3 text-xs font-semibold px-4 py-2 bg-white text-slate-700 border border-slate-200 rounded-xl shadow-xs hover:bg-slate-50 transition cursor-pointer flex items-center gap-1.5"
+                    className={`mt-3 text-xs font-semibold px-4 py-2 rounded-xl shadow-xs transition cursor-pointer flex items-center gap-1.5 ${
+                      isUpiPayment && uploadedBills.length === 0
+                        ? "bg-amber-600 text-white hover:bg-amber-700 border border-amber-600"
+                        : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+                    }`}
                   >
-                    <Plus className="h-3.5 w-3.5 text-indigo-600" /> Browse & Add Multiple Bills
+                    <Plus className={`h-3.5 w-3.5 ${isUpiPayment && uploadedBills.length === 0 ? "text-white" : "text-indigo-600"}`} /> Browse & Add Multiple Bills
                   </button>
                 </>
               )}
@@ -881,7 +964,13 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
               </div>
             </div>
 
-            <div className="flex gap-3 w-full sm:w-auto justify-end">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto justify-end">
+              {isUpiPayment && uploadedBills.length === 0 && (
+                <span className="text-xs text-amber-700 font-semibold flex items-center gap-1.5 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200">
+                  <AlertCircle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                  Bill upload required for {paymentSubMode}
+                </span>
+              )}
               <button
                 id="form-submit-claim"
                 type="submit"

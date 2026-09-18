@@ -17,6 +17,7 @@ import {
   Eye,
   AlertCircle,
   CheckCircle,
+  Calculator,
   Loader2,
   ZoomIn,
   ZoomOut,
@@ -94,6 +95,8 @@ export default function EditExpenseModal({
 
   const [vendor, setVendor] = useState(expense.vendor || "");
   const [amount, setAmount] = useState<string>((expense.amount || 0).toString());
+  const [amountExpression, setAmountExpression] = useState<string>("");
+  const [isAmountFocused, setIsAmountFocused] = useState<boolean>(false);
   const [gstAmount, setGstAmount] = useState<string>((expense.gstAmount || 0).toString());
   
   // Payment mode parsing
@@ -109,6 +112,8 @@ export default function EditExpenseModal({
     if (PAYMENT_SUB_MODES.includes(expense.paymentMethod)) return expense.paymentMethod;
     return "";
   });
+
+  const isUpiPayment = paymentSubMode === "UPI" || paymentSubMode === "UPI+Cash";
 
   const [status, setStatus] = useState<Expense["status"]>(expense.status || "pending");
   const [adminComments, setAdminComments] = useState<string>(expense.adminComments || "");
@@ -154,7 +159,9 @@ export default function EditExpenseModal({
   // Math expression evaluator for Amount
   const parseAmountExpression = (expr: string): number | null => {
     if (!expr || !expr.trim()) return 0;
-    const sanitized = expr.trim().replace(/×/g, "*").replace(/÷/g, "/");
+    let sanitized = expr.trim().replace(/×/g, "*").replace(/÷/g, "/");
+    sanitized = sanitized.replace(/[+*/-]+$/, "").trim();
+    if (!sanitized) return 0;
     if (!/^[0-9+*/.() -]+$/.test(sanitized)) {
       return null;
     }
@@ -394,6 +401,15 @@ export default function EditExpenseModal({
       return;
     }
 
+    const totalBills = existingBills.length + newBills.length;
+    if (isUpiPayment && totalBills === 0) {
+      setAlertMsg({
+        type: "error",
+        text: `Uploading a bill/receipt is mandatory when selecting ${paymentSubMode} as the payment mode. Please attach at least one bill or receipt.`
+      });
+      return;
+    }
+
     setSubmitting(true);
     setAlertMsg(null);
 
@@ -598,21 +614,60 @@ export default function EditExpenseModal({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 uppercase mb-1">
-                    Amount (₹) *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-bold text-slate-600 uppercase">
+                      Amount (₹) *
+                    </label>
+                    {amountExpression && /[+*/-]/.test(amountExpression) && (
+                      <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 flex items-center gap-1 font-mono">
+                        <Calculator className="h-3 w-3 text-indigo-600" />
+                        {isAmountFocused ? `= ₹${parsedAmount.toFixed(2)}` : `${amountExpression} = ₹${parsedAmount.toFixed(2)}`}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    placeholder="e.g. 250 or 94+94+57"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setAmount(val);
+                      setAmountExpression(val);
+                    }}
+                    onFocus={() => {
+                      setIsAmountFocused(true);
+                      if (amountExpression && /[+*/-]/.test(amountExpression)) {
+                        setAmount(amountExpression);
+                      }
+                    }}
+                    onBlur={() => {
+                      setIsAmountFocused(false);
+                      if (parsedAmount > 0 && /[+*/-]/.test(amount)) {
+                        setAmountExpression(amount);
+                        setAmount(parsedAmount.toString());
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }}
+                    placeholder="e.g. 250 or 100+200+450"
                     required
                     disabled={!canEdit || submitting}
                     className="w-full px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
                   />
-                  {amount && amount.includes("+") && (
+                  {amountExpression && /[+*/-]/.test(amountExpression) ? (
                     <span className="block text-[10px] text-indigo-600 mt-1 font-mono">
-                      Evaluated: ₹{parsedAmount.toFixed(2)}
+                      {isAmountFocused ? (
+                        <span>Auto-evaluates on blur or Enter: <strong>{amount}</strong> = <strong>₹{parsedAmount.toFixed(2)}</strong></span>
+                      ) : (
+                        <span>Addition breakdown: <strong className="font-mono bg-indigo-50 px-1 py-0.5 rounded text-indigo-800 border border-indigo-100">{amountExpression}</strong> = <strong>₹{parsedAmount.toFixed(2)}</strong> <span className="text-slate-400 font-normal">(Click box to view/edit additions)</span></span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="block text-[10px] text-slate-400 mt-1">
+                      Tip: e.g. <code className="bg-slate-100 px-1 rounded text-slate-600 font-mono">100+200+450</code> sums to ₹750.
                     </span>
                   )}
                 </div>
@@ -669,13 +724,29 @@ export default function EditExpenseModal({
                     value={paymentSubMode}
                     onChange={(e) => setPaymentSubMode(e.target.value)}
                     disabled={!canEdit || submitting}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    className={`w-full px-3 py-2 bg-white border rounded-xl text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${
+                      isUpiPayment ? "border-amber-300 bg-amber-50/20" : "border-slate-200"
+                    }`}
                   >
                     <option value="">Select Sub-Mode (Optional)</option>
                     {PAYMENT_SUB_MODES.map((sm) => (
-                      <option key={sm} value={sm}>{sm}</option>
+                      <option key={sm} value={sm}>
+                        {sm} {sm === "UPI" || sm === "UPI+Cash" ? "(Bill upload mandatory)" : ""}
+                      </option>
                     ))}
                   </select>
+
+                  {isUpiPayment && (
+                    <div className="mt-2 p-2.5 rounded-xl bg-amber-50/90 border border-amber-200 text-amber-900 text-xs flex items-start gap-2 shadow-2xs">
+                      <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                      <div>
+                        <span className="font-bold block text-amber-950">Bill Receipt Upload Mandatory</span>
+                        <span className="text-amber-800">
+                          Uploading at least one supporting bill or receipt document is <strong>mandatory</strong> for <strong>{paymentSubMode}</strong> transactions.
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -724,8 +795,14 @@ export default function EditExpenseModal({
             {/* Bill Attachments Manager */}
             <div className="space-y-3">
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
-                <span className="flex items-center gap-1.5">
+                <span className="flex items-center gap-1.5 flex-wrap">
                   <FileText className="h-3.5 w-3.5 text-indigo-600" /> Attached Receipts & Bills
+                  {isUpiPayment ? (
+                    <span className="text-rose-600 font-bold normal-case text-xs bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200 flex items-center gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse"></span>
+                      Mandatory for {paymentSubMode}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="text-[10px] text-slate-400 font-normal">
                   ({existingBills.length + newBills.length} File(s))
@@ -830,6 +907,8 @@ export default function EditExpenseModal({
                   className={`border-2 border-dashed rounded-2xl p-4 text-center transition cursor-pointer ${
                     isDragActive
                       ? "border-indigo-500 bg-indigo-50/50"
+                      : isUpiPayment && (existingBills.length + newBills.length) === 0
+                      ? "border-amber-400 bg-amber-50/30 hover:bg-amber-50/60 ring-2 ring-amber-400/20"
                       : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/60"
                   }`}
                 >
@@ -842,7 +921,15 @@ export default function EditExpenseModal({
                     className="hidden"
                   />
                   <label htmlFor="edit-modal-file-upload" className="cursor-pointer block">
-                    <Upload className="h-6 w-6 text-indigo-500 mx-auto mb-1.5" />
+                    {isUpiPayment && (existingBills.length + newBills.length) === 0 && (
+                      <div className="mb-2 inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-300 rounded-full text-xs font-bold shadow-2xs">
+                        <AlertCircle className="h-3.5 w-3.5 text-amber-700 shrink-0" />
+                        Receipt upload is required for {paymentSubMode}
+                      </div>
+                    )}
+                    <Upload className={`h-6 w-6 mx-auto mb-1.5 ${
+                      isUpiPayment && (existingBills.length + newBills.length) === 0 ? "text-amber-600" : "text-indigo-500"
+                    }`} />
                     <span className="text-xs font-bold text-slate-700 block">
                       Click to upload new receipts or drag & drop files
                     </span>

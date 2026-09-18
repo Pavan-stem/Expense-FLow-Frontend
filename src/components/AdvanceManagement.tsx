@@ -23,7 +23,8 @@ import {
   RefreshCw, 
   AlertCircle,
   Building2,
-  History
+  History,
+  Receipt
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 

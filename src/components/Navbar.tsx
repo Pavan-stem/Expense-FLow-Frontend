@@ -32,18 +32,19 @@ export default function Navbar({
 
   // Fetch notifications
   const fetchNotifications = async () => {
+    if (!user?.employeeId) return;
     try {
       const data = await getUserNotifications(user.employeeId);
       setNotifications(data);
     } catch (e) {
-      console.error(e);
+      console.warn("Could not load notifications:", e);
     }
   };
 
   useEffect(() => {
     fetchNotifications();
-    // Refresh notifications every 20 seconds
-    const interval = setInterval(fetchNotifications, 20000);
+    // Refresh notifications every 2 minutes to conserve Firestore quota
+    const interval = setInterval(fetchNotifications, 120000);
     return () => clearInterval(interval);
   }, [user.employeeId]);
 

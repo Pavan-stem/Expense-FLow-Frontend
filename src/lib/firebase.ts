@@ -192,6 +192,9 @@ export function isPersonalPaymentMethod(method?: string, source?: string): boole
  * This runs on app startup.
  */
 export async function seedDatabaseIfNeeded() {
+  if (localStorage.getItem("ef_categories_seeded")) {
+    return;
+  }
   try {
     // 1. Seed categories
     const categoriesCol = collection(db, "categories");
@@ -203,11 +206,10 @@ export async function seedDatabaseIfNeeded() {
         await setDoc(doc(categoriesCol, id), { id, name: cat });
       }
     }
-
-    // Database initialized without hardcoded root admin
+    localStorage.setItem("ef_categories_seeded", "true");
     console.log("Database initialized.");
   } catch (error) {
-    console.error("Error seeding database:", error);
+    console.warn("Notice: Database seeding skipped or quota limit reached:", error);
   }
 }
 
@@ -314,11 +316,28 @@ export async function registerEmployee(profile: Omit<EmployeeProfile, "role">, p
 export async function getCategories(): Promise<ExpenseCategory[]> {
   try {
     const snap = await getDocs(collection(db, "categories"));
-    return snap.docs.map(d => d.data() as ExpenseCategory);
+    if (!snap.empty) {
+      const cats = snap.docs.map(d => d.data() as ExpenseCategory);
+      try {
+        localStorage.setItem("ef_cached_categories", JSON.stringify(cats));
+      } catch {}
+      return cats;
+    }
   } catch (error) {
-    console.error("Error getting categories:", error);
-    return [];
+    console.warn("Could not fetch categories from server, using cached/predefined categories:", error);
   }
+
+  // Fallback 1: LocalStorage cache
+  try {
+    const cached = localStorage.getItem("ef_cached_categories");
+    if (cached) return JSON.parse(cached);
+  } catch {}
+
+  // Fallback 2: Predefined categories
+  return PREDEFINED_CATEGORIES.map(cat => ({
+    id: cat.toLowerCase().replace(/[^a-z0-9]/g, "_"),
+    name: cat
+  }));
 }
 
 export async function addCategory(name: string): Promise<ExpenseCategory | null> {
@@ -517,6 +536,7 @@ export async function clearVoucherCommentsForMonth(
 }
 
 export async function getUserNotifications(userId: string): Promise<AppNotification[]> {
+  const cacheKey = `ef_cached_notifs_${userId}`;
   try {
     const q = query(
       collection(db, "notifications"),
@@ -524,10 +544,17 @@ export async function getUserNotifications(userId: string): Promise<AppNotificat
     );
     const snap = await getDocs(q);
     const notifications = snap.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification));
-    // Sort descending by timestamp locally
-    return notifications.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    notifications.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(notifications));
+    } catch {}
+    return notifications;
   } catch (error) {
-    console.error("Error getting notifications:", error);
+    console.warn("Could not fetch notifications from server:", error);
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch {}
     return [];
   }
 }
@@ -1073,47 +1100,7 @@ export async function getExpenses(): Promise<Expense[]> {
     const snap = await getDocs(collection(db, "expenses"));
     const expenses = snap.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
 
-    // Group and check for out-of-order voucher numbers to trigger self-healing resequencing
-    const groups: { [key: string]: Expense[] } = {};
-    expenses.forEach(e => {
-      if (e.date) {
-        const ym = e.date.substring(0, 7);
-        if (!groups[ym]) groups[ym] = [];
-        groups[ym].push(e);
-      }
-    });
-
-    let neededResequence = false;
-    for (const ym of Object.keys(groups)) {
-      const list = groups[ym];
-      // Sort chronologically (earliest first)
-      list.sort((a, b) => {
-        const dateComp = (a.date || "").localeCompare(b.date || "");
-        if (dateComp !== 0) return dateComp;
-        return (a.createdDate || "").localeCompare(b.createdDate || "");
-      });
-
-      // Check if voucher numbers are perfectly SW-MM-001, SW-MM-002, ...
-      const monthPart = ym.split("-")[1] || "01";
-      let match = true;
-      for (let i = 0; i < list.length; i++) {
-        const expected = `SW-${monthPart}-${String(i + 1).padStart(3, "0")}`;
-        if (list[i].voucherNumber !== expected) {
-          match = false;
-          break;
-        }
-      }
-      if (!match) {
-        neededResequence = true;
-        await resequenceVouchersForMonth(ym);
-      }
-    }
-
     let finalExpenses = expenses;
-    if (neededResequence) {
-      const freshSnap = await getDocs(collection(db, "expenses"));
-      finalExpenses = freshSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense));
-    }
 
     // Sort ascending by YearMonth, then ascending by voucher sequence suffix
     finalExpenses.sort((a, b) => {
@@ -1132,14 +1119,23 @@ export async function getExpenses(): Promise<Expense[]> {
       return vA.localeCompare(vB);
     });
 
+    try {
+      localStorage.setItem("ef_cached_all_expenses", JSON.stringify(finalExpenses));
+    } catch {}
+
     return finalExpenses;
   } catch (error) {
-    console.error("Error getting expenses:", error);
+    console.warn("Could not fetch expenses from server, loading from offline cache:", error);
+    try {
+      const cached = localStorage.getItem("ef_cached_all_expenses");
+      if (cached) return JSON.parse(cached);
+    } catch {}
     return [];
   }
 }
 
 export async function getExpensesByEmployee(employeeId: string): Promise<Expense[]> {
+  const cacheKey = `ef_cached_expenses_${employeeId}`;
   try {
     const q = query(collection(db, "expenses"), where("employeeId", "==", employeeId));
     const snap = await getDocs(q);
@@ -1162,9 +1158,17 @@ export async function getExpensesByEmployee(employeeId: string): Promise<Expense
       return vA.localeCompare(vB);
     });
 
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify(expenses));
+    } catch {}
+
     return expenses;
   } catch (error) {
-    console.error("Error getting employee expenses:", error);
+    console.warn("Could not fetch employee expenses from server, loading from offline cache:", error);
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch {}
     return [];
   }
 }
@@ -1247,9 +1251,16 @@ export async function getEmployees(): Promise<EmployeeProfile[]> {
         }
       }
     }
+    try {
+      localStorage.setItem("ef_cached_employees", JSON.stringify(uniqueList));
+    } catch {}
     return uniqueList;
   } catch (error) {
-    console.error("Error getting employees:", error);
+    console.warn("Could not fetch employees from server, loading from cache:", error);
+    try {
+      const cached = localStorage.getItem("ef_cached_employees");
+      if (cached) return JSON.parse(cached);
+    } catch {}
     return [];
   }
 }
