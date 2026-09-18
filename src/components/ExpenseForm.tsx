@@ -9,16 +9,17 @@ import {
   type BillFile,
   type Expense
 } from "../lib/firebase";
-import { Upload, FileText, Image, Trash2, X, AlertTriangle, AlertCircle, Sparkles, Receipt, Coins, Eye, ZoomIn, ZoomOut, RotateCcw, RotateCw, RefreshCw, Calculator, Loader2, Plus, ChevronLeft, ChevronRight, UserCheck, Building2, Wallet, CheckCircle2 } from "lucide-react";
+import { Upload, FileText, Image, Trash2, X, AlertTriangle, AlertCircle, Sparkles, Receipt, Coins, Eye, ZoomIn, ZoomOut, RotateCcw, RotateCw, RefreshCw, Calculator, Loader2, Plus, ChevronLeft, ChevronRight, ArrowLeft, UserCheck, Building2, Wallet, CheckCircle2 } from "lucide-react";
 
 import { motion, AnimatePresence } from "motion/react";
 
 interface ExpenseFormProps {
   user: EmployeeProfile;
   onSuccess: () => void;
+  onBack?: () => void;
 }
 
-export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
+export default function ExpenseForm({ user, onSuccess, onBack }: ExpenseFormProps) {
   // Form State
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [amount, setAmount] = useState("");
@@ -447,6 +448,18 @@ export default function ExpenseForm({ user, onSuccess }: ExpenseFormProps) {
     <div id="expense-form-container" className="max-w-4xl mx-auto py-6 px-4">
       <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 sm:p-8">
         <div className="flex items-center gap-3 border-b border-slate-100 pb-5 mb-6">
+          {onBack && (
+            <button
+              type="button"
+              id="form-back-btn"
+              onClick={onBack}
+              className="p-2 sm:px-3 sm:py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl transition shadow-2xs flex items-center gap-1.5 cursor-pointer text-xs font-bold mr-1"
+              title="Back to Dashboard"
+            >
+              <ArrowLeft className="h-4 w-4 text-slate-600" />
+              <span className="hidden sm:inline">Back</span>
+            </button>
+          )}
           <span className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
             <Receipt className="h-6 w-6" />
           </span>

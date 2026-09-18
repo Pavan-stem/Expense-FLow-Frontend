@@ -136,15 +136,16 @@ export default function App() {
                   onSuccess={() => {
                     triggerRefresh();
                   }}
+                  onBack={() => setActiveTab("dashboard")}
                 />
               )}
-
 
               {activeTab === "advances" && (
                 <AdvanceManagement
                   user={currentUser}
                   refreshTrigger={refreshTrigger}
                   onNavigateToSubmit={() => setActiveTab("submit")}
+                  onBack={() => setActiveTab("dashboard")}
                 />
               )}
 
@@ -154,6 +155,7 @@ export default function App() {
                   refreshTrigger={refreshTrigger}
                   targetExpenseId={targetExpenseId}
                   onClearTargetExpense={() => setTargetExpenseId(null)}
+                  onBack={() => setActiveTab("dashboard")}
                 />
               )}
 

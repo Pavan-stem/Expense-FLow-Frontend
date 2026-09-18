@@ -16,6 +16,7 @@ import {
   PlusCircle, 
   ArrowUpRight,
   ArrowDownLeft,
+  ArrowLeft,
   Clock, 
   CheckCircle2, 
   Search, 
@@ -32,9 +33,10 @@ interface AdvanceManagementProps {
   user: EmployeeProfile;
   refreshTrigger?: number;
   onNavigateToSubmit?: () => void;
+  onBack?: () => void;
 }
 
-export default function AdvanceManagement({ user, refreshTrigger, onNavigateToSubmit }: AdvanceManagementProps) {
+export default function AdvanceManagement({ user, refreshTrigger, onNavigateToSubmit, onBack }: AdvanceManagementProps) {
   const [advances, setAdvances] = useState<AdvancePayment[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
@@ -382,9 +384,23 @@ export default function AdvanceManagement({ user, refreshTrigger, onNavigateToSu
         <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/20 text-indigo-300 rounded-full text-xs font-semibold tracking-wider uppercase border border-indigo-500/30">
-              <Wallet className="h-3.5 w-3.5" />
-              <span>{user.role === "admin" ? "Corporate Advance Pool" : "Employee Advance Wallet"}</span>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              {onBack && (
+                <button
+                  type="button"
+                  id="advance-back-btn"
+                  onClick={onBack}
+                  className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-full text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer border border-white/15 backdrop-blur-xs"
+                  title="Back to Dashboard"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  <span>Back</span>
+                </button>
+              )}
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-500/20 text-indigo-300 rounded-full text-xs font-semibold tracking-wider uppercase border border-indigo-500/30">
+                <Wallet className="h-3.5 w-3.5" />
+                <span>{user.role === "admin" ? "Corporate Advance Pool" : "Employee Advance Wallet"}</span>
+              </div>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
               Advance & Expense Management

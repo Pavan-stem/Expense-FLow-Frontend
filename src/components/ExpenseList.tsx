@@ -34,6 +34,7 @@ import {
   Filter, 
   ChevronRight,
   ChevronLeft,
+  ArrowLeft,
   CheckCircle, 
   XCircle, 
   Clock, 
@@ -64,9 +65,10 @@ interface ExpenseListProps {
   refreshTrigger: number;
   targetExpenseId?: string | null;
   onClearTargetExpense?: () => void;
+  onBack?: () => void;
 }
 
-export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onClearTargetExpense }: ExpenseListProps) {
+export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onClearTargetExpense, onBack }: ExpenseListProps) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -812,11 +814,25 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
 
       {/* Title */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-5">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 font-sans">
-            {user.role === "admin" ? "Employee Expense Claim Hub" : "My Submitted Expense Claims"}
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">Filter, audit, view receipts, and update claim statuses.</p>
+        <div className="flex items-center gap-3">
+          {onBack && (
+            <button
+              type="button"
+              id="expenses-back-btn"
+              onClick={onBack}
+              className="p-2 sm:px-3 sm:py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl transition shadow-2xs flex items-center gap-1.5 cursor-pointer text-xs font-bold"
+              title="Back to Dashboard"
+            >
+              <ArrowLeft className="h-4 w-4 text-slate-600" />
+              <span className="hidden sm:inline">Back</span>
+            </button>
+          )}
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 font-sans">
+              {user.role === "admin" ? "Employee Expense Claim Hub" : "My Submitted Expense Claims"}
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">Filter, audit, view receipts, and update claim statuses.</p>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 self-start md:self-auto">
