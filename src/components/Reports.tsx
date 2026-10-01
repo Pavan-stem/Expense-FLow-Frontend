@@ -52,7 +52,7 @@ export default function Reports({ user, refreshTrigger }: ReportsProps) {
       if (user.role === "admin") {
         expData = await getExpenses();
         const empData = await getEmployees();
-        const nonAdminEmps = empData.filter(e => e.role !== "admin" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM");
+        const nonAdminEmps = empData.filter(e => e.role !== "admin" && e.role !== "verifier" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM");
         setEmployees(nonAdminEmps);
         if (nonAdminEmps.length > 0) setSelectedEmployee(nonAdminEmps[0].employeeId);
       } else {

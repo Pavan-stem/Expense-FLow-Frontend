@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { seedDatabaseIfNeeded, type EmployeeProfile } from "./lib/firebase";
+import { seedDatabaseIfNeeded, markAllUserNotificationsAsRead, type EmployeeProfile } from "./lib/firebase";
 import Login from "./components/Login";
 import Navbar from "./components/Navbar";
 import Sidebar, { type SidebarTab } from "./components/Sidebar";
 import EmployeeDashboard from "./components/EmployeeDashboard";
 import AdminDashboard from "./components/AdminDashboard";
+import VerifierDashboard from "./components/VerifierDashboard";
 import ExpenseForm from "./components/ExpenseForm";
 import ExpenseList from "./components/ExpenseList";
 import ProfileView from "./components/ProfileView";
@@ -21,12 +22,30 @@ export default function App() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [targetExpenseId, setTargetExpenseId] = useState<string | null>(null);
 
+  // Auto-mark notifications as read when respective tabs are opened
+  useEffect(() => {
+    if (!currentUser?.employeeId) return;
+
+    if (currentUser.role === "employee" && activeTab === "expenses") {
+      markAllUserNotificationsAsRead(currentUser.employeeId);
+    } else if (currentUser.role === "verifier" && (activeTab === "expenses" || activeTab === "dashboard")) {
+      markAllUserNotificationsAsRead(currentUser.employeeId);
+    } else if (currentUser.role === "admin" && (activeTab === "expenses" || activeTab === "dashboard")) {
+      markAllUserNotificationsAsRead(currentUser.employeeId);
+    }
+  }, [activeTab, currentUser?.employeeId, currentUser?.role]);
+
   // Database auto-seeding on mount
   useEffect(() => {
     const initDb = async () => {
       await seedDatabaseIfNeeded();
     };
     initDb();
+
+    // Clean stale cached employees if any exist
+    try {
+      localStorage.removeItem("ef_cached_employees");
+    } catch {}
 
     // Recover login session from localStorage
     const savedUser = localStorage.getItem("expense_flow_user");
@@ -42,13 +61,21 @@ export default function App() {
   const handleLoginSuccess = (user: EmployeeProfile) => {
     setCurrentUser(user);
     localStorage.setItem("expense_flow_user", JSON.stringify(user));
-    // Default to dashboard after logging in
     setActiveTab("dashboard");
+    // Keep URL in sync with the user's role portal
+    if (user.role === "admin" && window.location.pathname !== "/admin") {
+      window.history.replaceState({}, "", "/admin");
+    } else if (user.role === "verifier" && window.location.pathname !== "/verifier") {
+      window.history.replaceState({}, "", "/verifier");
+    } else if (user.role === "employee" && window.location.pathname !== "/") {
+      window.history.replaceState({}, "", "/");
+    }
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem("expense_flow_user");
+    // The URL stays on current portal path so Login shows the right tab
   };
 
   const handleProfileUpdate = (updatedUser: EmployeeProfile) => {
@@ -119,6 +146,15 @@ export default function App() {
                     }}
                     refreshTrigger={refreshTrigger}
                   />
+                ) : currentUser.role === "verifier" ? (
+                  <VerifierDashboard
+                    user={currentUser}
+                    onNavigateToQueue={(expenseId) => {
+                      setActiveTab("expenses");
+                      if (expenseId) setTargetExpenseId(expenseId);
+                    }}
+                    refreshTrigger={refreshTrigger}
+                  />
                 ) : (
                   <EmployeeDashboard
                     user={currentUser}
@@ -130,7 +166,7 @@ export default function App() {
                 )
               )}
 
-              {activeTab === "submit" && (
+              {activeTab === "submit" && currentUser.role === "employee" && (
                 <ExpenseForm
                   user={currentUser}
                   onSuccess={() => {
@@ -180,7 +216,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === "bills" && (
+              {activeTab === "bills" && currentUser.role === "admin" && (
                 <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
                   <BillDocumentHub
                     user={currentUser}

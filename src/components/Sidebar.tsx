@@ -1,4 +1,4 @@
-import { LayoutDashboard, FileText, PlusCircle, User, BarChart2, FolderOpen, Shield, FileCheck, X, LogOut, Wallet } from "lucide-react";
+import { LayoutDashboard, FileText, PlusCircle, User, BarChart2, FolderOpen, Shield, FileCheck, X, LogOut, Wallet, ClipboardCheck } from "lucide-react";
 import { type EmployeeProfile } from "../lib/firebase";
 
 export type SidebarTab = "dashboard" | "submit" | "expenses" | "advances" | "bills" | "profile" | "analytics" | "reports";
@@ -18,10 +18,17 @@ export default function Sidebar({ activeTab, onTabChange, user, isMobileOpen, on
     { id: "advances" as SidebarTab, label: "Advance Wallet", icon: Wallet },
     { id: "submit" as SidebarTab, label: "New Expense", icon: PlusCircle },
     { id: "expenses" as SidebarTab, label: "My Expenses", icon: FileText },
-    { id: "bills" as SidebarTab, label: "My Bill Documents", icon: FileCheck },
+    // { id: "bills" as SidebarTab, label: "My Bill Documents", icon: FileCheck },
     { id: "profile" as SidebarTab, label: "My Profile", icon: User },
     { id: "analytics" as SidebarTab, label: "Spending Trends", icon: BarChart2 },
     { id: "reports" as SidebarTab, label: "Reports", icon: FolderOpen },
+  ];
+
+  const verifierMenuItems = [
+    { id: "dashboard" as SidebarTab, label: "Verifier Dashboard", icon: ClipboardCheck },
+    { id: "expenses" as SidebarTab, label: "Expense Queue", icon: FileText },
+    { id: "analytics" as SidebarTab, label: "Analytics", icon: BarChart2 },
+    { id: "profile" as SidebarTab, label: "Profile", icon: User },
   ];
 
   const adminMenuItems = [
@@ -34,7 +41,20 @@ export default function Sidebar({ activeTab, onTabChange, user, isMobileOpen, on
     { id: "profile" as SidebarTab, label: "Profile", icon: User },
   ];
 
-  const items = user.role === "admin" ? adminMenuItems : employeeMenuItems;
+  const items = user.role === "admin" ? adminMenuItems : user.role === "verifier" ? verifierMenuItems : employeeMenuItems;
+
+  const accentColor = user.role === "admin"
+    ? "bg-purple-600 shadow-purple-600/10"
+    : user.role === "verifier"
+    ? "bg-emerald-600 shadow-emerald-600/10"
+    : "bg-indigo-600 shadow-indigo-600/10";
+
+  const brandColor = user.role === "admin"
+    ? "bg-purple-600"
+    : user.role === "verifier"
+    ? "bg-emerald-600"
+    : "bg-indigo-600";
+
 
   return (
     <>
@@ -55,7 +75,7 @@ export default function Sidebar({ activeTab, onTabChange, user, isMobileOpen, on
         {/* Sidebar Brand Header */}
         <div className="h-16 flex items-center justify-between px-6 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white text-base">
+            <div className={`w-8 h-8 rounded-lg ${brandColor} flex items-center justify-center font-bold text-white text-base`}>
               EF
             </div>
             <div>
@@ -93,7 +113,7 @@ export default function Sidebar({ activeTab, onTabChange, user, isMobileOpen, on
                 }}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold transition cursor-pointer ${
                   isActive
-                    ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10"
+                    ? `${accentColor} text-white shadow-md`
                     : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
                 }`}
               >

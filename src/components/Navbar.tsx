@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { type EmployeeProfile, type AppNotification, getUserNotifications, markNotificationAsRead, markExpenseNotificationsAsRead } from "../lib/firebase";
+import { type EmployeeProfile, type AppNotification, subscribeToUserNotifications, markNotificationAsRead, markExpenseNotificationsAsRead } from "../lib/firebase";
 import { Bell, LogOut, Clock, CheckCircle, XCircle, AlertCircle, FileText, User, Menu } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -30,22 +30,15 @@ export default function Navbar({
     return () => clearInterval(timer);
   }, []);
 
-  // Fetch notifications
-  const fetchNotifications = async () => {
-    if (!user?.employeeId) return;
-    try {
-      const data = await getUserNotifications(user.employeeId);
-      setNotifications(data);
-    } catch (e) {
-      console.warn("Could not load notifications:", e);
-    }
-  };
-
+  // Real-time live notifications subscription
   useEffect(() => {
-    fetchNotifications();
-    // Refresh notifications every 2 minutes to conserve Firestore quota
-    const interval = setInterval(fetchNotifications, 120000);
-    return () => clearInterval(interval);
+    if (!user?.employeeId) return;
+    const unsubscribe = subscribeToUserNotifications(user.employeeId, (data) => {
+      setNotifications(data);
+    });
+    return () => {
+      unsubscribe();
+    };
   }, [user.employeeId]);
 
   const handleNotificationClick = async (notif: AppNotification) => {
@@ -145,7 +138,7 @@ export default function Navbar({
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 10 }}
-                  className="absolute right-0 mt-2.5 w-72 sm:w-80 bg-white border border-slate-100 rounded-2xl shadow-xl z-50 overflow-hidden"
+                  className="absolute -right-10 sm:right-0 mt-2.5 w-[calc(100vw-2rem)] sm:w-80 max-w-sm bg-white border border-slate-100 rounded-2xl shadow-2xl z-50 overflow-hidden"
                 >
                   <div className="p-3.5 sm:p-4 border-b border-slate-50 flex items-center justify-between bg-slate-50">
                     <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Notifications</span>

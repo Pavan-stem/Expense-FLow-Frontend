@@ -49,7 +49,7 @@ export interface EmployeeProfile {
   phone: string;
   manager: string;
   joiningDate: string;
-  role: "employee" | "admin";
+  role: "employee" | "admin" | "verifier";
   status?: "active" | "deactivated";
 }
 
@@ -65,7 +65,7 @@ export interface VoucherComment {
   id: string;
   senderId: string;
   senderName: string;
-  senderRole: "admin" | "employee";
+  senderRole: "admin" | "employee" | "verifier";
   message: string;
   timestamp: string;
 }
@@ -105,6 +105,11 @@ export interface Expense {
   gstAmount?: number;
   totalAmount: number;
   status: "pending" | "under_review" | "approved" | "rejected" | "reimbursed";
+  verificationStatus?: "pending" | "verified" | "flagged";
+  verifiedBy?: string;
+  verifiedByName?: string;
+  verifiedAt?: string;
+  verifierComments?: string;
   adminComments?: string;
   comments?: VoucherComment[];
   createdDate: string;
@@ -269,7 +274,7 @@ export async function loginWithEmailAndPassword(email: string, password: string)
 export async function registerUser(
   profile: Omit<EmployeeProfile, "role">,
   password: string,
-  role: "employee" | "admin" = "employee"
+  role: "employee" | "admin" | "verifier" = "employee"
 ): Promise<EmployeeProfile | null> {
   const cleanEmail = profile.email.toLowerCase().trim();
   const fullProfile: EmployeeProfile = {
@@ -398,7 +403,7 @@ export async function addVoucherComment(
   commentData: {
     senderId: string;
     senderName: string;
-    senderRole: "admin" | "employee";
+    senderRole: "admin" | "employee" | "verifier";
     message: string;
   }
 ): Promise<VoucherComment[]> {
@@ -544,7 +549,7 @@ export async function getUserNotifications(userId: string): Promise<AppNotificat
     );
     const snap = await getDocs(q);
     const notifications = snap.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification));
-    notifications.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    notifications.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
     try {
       localStorage.setItem(cacheKey, JSON.stringify(notifications));
     } catch {}
@@ -559,6 +564,43 @@ export async function getUserNotifications(userId: string): Promise<AppNotificat
   }
 }
 
+export function subscribeToUserNotifications(
+  userId: string, 
+  callback: (notifs: AppNotification[]) => void
+): () => void {
+  if (!userId) {
+    callback([]);
+    return () => {};
+  }
+  const cacheKey = `ef_cached_notifs_${userId}`;
+  try {
+    const q = query(
+      collection(db, "notifications"),
+      where("userId", "==", userId)
+    );
+    const unsubscribe = onSnapshot(
+      q,
+      (snap) => {
+        const notifs = snap.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification));
+        notifs.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify(notifs));
+        } catch {}
+        callback(notifs);
+      },
+      (error) => {
+        console.warn("Real-time notifications subscription error:", error);
+        getUserNotifications(userId).then(callback);
+      }
+    );
+    return unsubscribe;
+  } catch (error) {
+    console.warn("Failed to attach notifications listener:", error);
+    getUserNotifications(userId).then(callback);
+    return () => {};
+  }
+}
+
 export async function markNotificationAsRead(id: string) {
   try {
     await updateDoc(doc(db, "notifications", id), { read: true });
@@ -567,18 +609,37 @@ export async function markNotificationAsRead(id: string) {
   }
 }
 
+export async function markAllUserNotificationsAsRead(userId: string): Promise<void> {
+  if (!userId) return;
+  try {
+    const q = query(
+      collection(db, "notifications"),
+      where("userId", "==", userId)
+    );
+    const snap = await getDocs(q);
+    const unreadDocs = snap.docs.filter(d => !d.data().read);
+    if (unreadDocs.length === 0) return;
+    
+    await Promise.all(
+      unreadDocs.map(d => updateDoc(doc(db, "notifications", d.id), { read: true }))
+    );
+  } catch (error) {
+    console.error("Error marking all notifications as read:", error);
+  }
+}
+
 export async function markExpenseNotificationsAsRead(userId: string, expenseId?: string, voucherNumber?: string) {
   if (!userId || (!expenseId && !voucherNumber)) return;
   try {
     const q = query(
       collection(db, "notifications"),
-      where("userId", "==", userId),
-      where("read", "==", false)
+      where("userId", "==", userId)
     );
     const snap = await getDocs(q);
     const batchPromises = snap.docs
       .filter(d => {
         const notif = d.data() as AppNotification;
+        if (notif.read) return false;
         const msg = `${notif.title || ''} ${notif.message || ''}`;
         const isExpIdMatch = Boolean(expenseId && (notif.expenseId === expenseId || msg.includes(expenseId)));
         const isVNumMatch = Boolean(voucherNumber && (notif.voucherNumber === voucherNumber || msg.includes(voucherNumber)));
@@ -905,7 +966,7 @@ export async function updateExpenseWithBills(
   removedBillIds: string[],
   updaterUserId: string,
   updaterName: string,
-  updaterRole: "admin" | "employee"
+  updaterRole: "admin" | "employee" | "verifier"
 ): Promise<void> {
   try {
     const ref = doc(db, "expenses", expenseId);
@@ -1235,6 +1296,20 @@ export function subscribeToExpensesByEmployee(employeeId: string, callback: (exp
 }
 
 
+export function isRealEmployee(emp: Partial<EmployeeProfile> | null | undefined): boolean {
+  if (!emp) return false;
+  const role = (emp.role || "").toLowerCase().trim();
+  const email = (emp.email || "").toLowerCase().trim();
+  const id = (emp.employeeId || emp.id || "").toLowerCase().trim();
+  const name = (emp.name || "").toLowerCase().trim();
+
+  if (role === "admin" || role === "verifier") return false;
+  if (id.startsWith("adm") || id.startsWith("ver") || id === "adm_stem") return false;
+  if (email === "stem@admin.com" || email === "stem.admin@gmail.com" || email.includes("admin") || email === "srinivas@gmail.com") return false;
+  if (name.includes("admin") || name.includes("stemworld") || name === "srinivas") return false;
+  return true;
+}
+
 export async function getEmployees(): Promise<EmployeeProfile[]> {
   try {
     const snap = await getDocs(collection(db, "users"));
@@ -1243,7 +1318,7 @@ export async function getEmployees(): Promise<EmployeeProfile[]> {
     const seen = new Set<string>();
     const uniqueList: EmployeeProfile[] = [];
     for (const emp of list) {
-      if (emp.employeeId) {
+      if (emp.employeeId && isRealEmployee(emp)) {
         const idKey = emp.employeeId.trim().toLowerCase();
         if (!seen.has(idKey)) {
           seen.add(idKey);
@@ -1259,7 +1334,10 @@ export async function getEmployees(): Promise<EmployeeProfile[]> {
     console.warn("Could not fetch employees from server, loading from cache:", error);
     try {
       const cached = localStorage.getItem("ef_cached_employees");
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        const parsed = JSON.parse(cached) as EmployeeProfile[];
+        return parsed.filter(isRealEmployee);
+      }
     } catch {}
     return [];
   }
@@ -1749,4 +1827,82 @@ export function calculateAdvanceSummary(
     pendingClaimsCount: pendingClaims.length
   };
 }
+
+/**
+ * Verifier marks an expense as verified or flags it with comments.
+ */
+export async function verifyExpense(
+  expenseId: string,
+  verificationStatus: "verified" | "flagged",
+  verifierId: string,
+  verifierName: string,
+  verifierComments?: string
+): Promise<void> {
+  try {
+    const ref = doc(db, "expenses", expenseId);
+    const expSnap = await getDoc(ref);
+    if (!expSnap.exists()) throw new Error("Expense not found.");
+    const exp = expSnap.data() as Expense;
+
+    const payload: Record<string, any> = {
+      verificationStatus,
+      verifiedBy: verifierId,
+      verifiedByName: verifierName,
+      verifiedAt: new Date().toISOString(),
+      verifierComments: verifierComments || "",
+      status: verificationStatus === "verified" ? "under_review" : "pending",
+    };
+    await updateDoc(ref, payload);
+
+    const adminsQuery = query(collection(db, "users"), where("role", "==", "admin"));
+    const adminsSnap = await getDocs(adminsQuery);
+    const vNum = exp.voucherNumber || expenseId;
+    for (const adminDoc of adminsSnap.docs) {
+      await createNotification(
+        adminDoc.id,
+        verificationStatus === "verified" ? `Voucher ${vNum} Verified` : `Voucher ${vNum} Flagged`,
+        verificationStatus === "verified"
+          ? `${verifierName} verified expense from ${exp.employeeName}. Ready for approval.`
+          : `${verifierName} flagged expense from ${exp.employeeName}: "${(verifierComments || "").substring(0, 80)}"`,
+        expenseId, vNum
+      );
+    }
+    await createNotification(
+      exp.employeeId,
+      verificationStatus === "verified" ? `Expense (${vNum}) Verified` : `Expense (${vNum}) Flagged`,
+      verificationStatus === "verified"
+        ? `${verifierName} verified your expense and forwarded it for admin approval.`
+        : `${verifierName} flagged your expense: "${(verifierComments || "").substring(0, 80)}"`,
+      expenseId, vNum
+    );
+    await logActivity(verifierId, verifierName,
+      verificationStatus === "verified" ? "Expense Verified" : "Expense Flagged",
+      `Verifier ${verificationStatus} expense ${vNum} (${exp.employeeName})`
+    );
+  } catch (error) {
+    console.error("Error verifying expense:", error);
+    throw error;
+  }
+}
+
+/**
+ * Fetch all expenses visible to verifiers (pending + under_review).
+ */
+export async function getExpensesForVerification(): Promise<Expense[]> {
+  try {
+    const pendingQ = query(collection(db, "expenses"), where("status", "==", "pending"));
+    const reviewQ = query(collection(db, "expenses"), where("status", "==", "under_review"));
+    const [pendingSnap, reviewSnap] = await Promise.all([getDocs(pendingQ), getDocs(reviewQ)]);
+    const expenses: Expense[] = [
+      ...pendingSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense)),
+      ...reviewSnap.docs.map(d => ({ id: d.id, ...d.data() } as Expense)),
+    ];
+    expenses.sort((a, b) => (b.createdDate || "").localeCompare(a.createdDate || ""));
+    return expenses;
+  } catch (error) {
+    console.error("Error fetching expenses for verification:", error);
+    return [];
+  }
+}
+
 

@@ -48,7 +48,7 @@ export default function AnalyticsHub({ user, refreshTrigger }: AnalyticsHubProps
         setExpenses(data);
 
         const emps = await getEmployees();
-        setEmployees(emps);
+        setEmployees(emps.filter(e => e.role !== "admin" && e.role !== "verifier"));
       } catch (err) {
         console.error(err);
       } finally {

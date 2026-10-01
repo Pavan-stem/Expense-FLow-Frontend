@@ -1,46 +1,46 @@
 import React, { useState, useEffect } from "react";
-import { 
-  getExpenses, 
+import {
+  getExpenses,
   subscribeToExpenses,
   subscribeToExpensesByEmployee,
-  getEmployees, 
+  getEmployees,
   getBillData,
   deleteExpense,
 
-  type EmployeeProfile, 
-  type Expense, 
+  type EmployeeProfile,
+  type Expense,
   type BillFile,
   isAdvancePaymentMethod,
   isPersonalPaymentMethod,
   isSwPaymentMethod
 } from "../lib/firebase";
-import { 
-  collectBillItems, 
-  exportBillsToWordDocx, 
-  exportBillsToPDF, 
-  generateBillFilename, 
-  type FlatBillItem 
+import {
+  collectBillItems,
+  exportBillsToWordDocx,
+  exportBillsToPDF,
+  generateBillFilename,
+  type FlatBillItem
 } from "../lib/billDocumentGenerator";
 import EditExpenseModal from "./EditExpenseModal";
-import { 
-  FileText, 
-  Download, 
-  Search, 
-  Filter, 
-  Grid, 
-  Eye, 
+import {
+  FileText,
+  Download,
+  Search,
+  Filter,
+  Grid,
+  Eye,
   Edit3,
-  Check, 
-  Calendar, 
-  User, 
-  RefreshCw, 
-  ZoomIn, 
-  ZoomOut, 
-  RotateCcw, 
+  Check,
+  Calendar,
+  User,
+  RefreshCw,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
   RotateCw,
-  X, 
+  X,
 
-  Layers, 
+  Layers,
   Sparkles,
   FileCheck,
   CheckSquare,
@@ -136,7 +136,7 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
 
       if (isAdmin) {
         const empData = await getEmployees();
-        const nonAdminEmps = empData.filter(e => e.role !== "admin" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM");
+        const nonAdminEmps = empData.filter(e => e.role !== "admin" && e.role !== "verifier" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM");
         setEmployees(nonAdminEmps);
       }
     } catch (err) {
@@ -150,17 +150,17 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
     setLoading(true);
     const unsub = isAdmin
       ? subscribeToExpenses((updatedData) => {
-          setExpenses(updatedData);
-          setLoading(false);
-        })
+        setExpenses(updatedData);
+        setLoading(false);
+      })
       : subscribeToExpensesByEmployee(user.employeeId, (updatedData) => {
-          setExpenses(updatedData);
-          setLoading(false);
-        });
+        setExpenses(updatedData);
+        setLoading(false);
+      });
 
     if (isAdmin) {
       getEmployees().then(empData => {
-        const nonAdminEmps = empData.filter(e => e.role !== "admin" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM");
+        const nonAdminEmps = empData.filter(e => e.role !== "admin" && e.role !== "verifier" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM");
         setEmployees(nonAdminEmps);
       });
     }
@@ -170,7 +170,7 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
 
 
   const monthsList = [
-    "All", "January", "February", "March", "April", "May", "June", 
+    "All", "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
   ];
   const yearsList = ["2024", "2025", "2026", "2027"];
@@ -295,8 +295,8 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
     selectedDay && billsByDate[selectedDay]
       ? billsByDate[selectedDay]
       : selectedBillIds.size > 0
-      ? allFilteredBills.filter((b) => selectedBillIds.has(b.billId))
-      : allFilteredBills;
+        ? allFilteredBills.filter((b) => selectedBillIds.has(b.billId))
+        : allFilteredBills;
 
   // Selected Employee Name for Filename
   let activeEmployeeName = user.name;
@@ -369,13 +369,13 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
       const exportSetIds = new Set(billsToExport.map((b) => b.billId));
       const itemsToExport = fullBillItems.filter((i) => exportSetIds.has(i.billId));
 
-      const exportLabel = selectedPaymentType === "advance" 
-        ? `SW_Advance_${selectedDay || selectedMonth}_${selectedYear}` 
+      const exportLabel = selectedPaymentType === "advance"
+        ? `SW_Advance_${selectedDay || selectedMonth}_${selectedYear}`
         : selectedPaymentType === "personal"
-        ? `Personal_${selectedDay || selectedMonth}_${selectedYear}`
-        : selectedPaymentType === "sw_direct"
-        ? `SW_Direct_${selectedDay || selectedMonth}_${selectedYear}`
-        : selectedDay || undefined;
+          ? `Personal_${selectedDay || selectedMonth}_${selectedYear}`
+          : selectedPaymentType === "sw_direct"
+            ? `SW_Direct_${selectedDay || selectedMonth}_${selectedYear}`
+            : selectedDay || undefined;
 
       await exportBillsToWordDocx(
         itemsToExport,
@@ -409,13 +409,13 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
       const exportSetIds = new Set(billsToExport.map((b) => b.billId));
       const itemsToExport = fullBillItems.filter((i) => exportSetIds.has(i.billId));
 
-      const exportLabel = selectedPaymentType === "advance" 
-        ? `SW_Advance_${selectedDay || selectedMonth}_${selectedYear}` 
+      const exportLabel = selectedPaymentType === "advance"
+        ? `SW_Advance_${selectedDay || selectedMonth}_${selectedYear}`
         : selectedPaymentType === "personal"
-        ? `Personal_${selectedDay || selectedMonth}_${selectedYear}`
-        : selectedPaymentType === "sw_direct"
-        ? `SW_Direct_${selectedDay || selectedMonth}_${selectedYear}`
-        : selectedDay || undefined;
+          ? `Personal_${selectedDay || selectedMonth}_${selectedYear}`
+          : selectedPaymentType === "sw_direct"
+            ? `SW_Direct_${selectedDay || selectedMonth}_${selectedYear}`
+            : selectedDay || undefined;
 
       await exportBillsToPDF(
         itemsToExport,
@@ -489,197 +489,177 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
 
       {/* Control Bar: Filters & Download Action Panel */}
       <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-3">
-            {isAdmin && (
-              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs">
-                <User className="h-3.5 w-3.5 text-slate-400" />
-                <span className="text-slate-500 font-semibold">Employee:</span>
-                <select
-                  id="filter-employee-select"
-                  value={selectedEmployeeId}
-                  onChange={(e) => setSelectedEmployeeId(e.target.value)}
-                  className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
-                >
-                  <option value="all">All Employees ({employees.length})</option>
-                  {employees.map((emp) => (
-                    <option key={emp.employeeId} value={emp.employeeId}>
-                      {emp.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
+        {/* Filters + Search — single flex-wrap row */}
+        <div className="flex flex-wrap items-center gap-3">
+          {isAdmin && (
             <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs">
-              <Calendar className="h-3.5 w-3.5 text-slate-400" />
-              <span className="text-slate-500 font-semibold">Month:</span>
+              <User className="h-3.5 w-3.5 text-slate-400" />
+              <span className="text-slate-500 font-semibold">Employee:</span>
               <select
-                id="filter-month-select"
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
+                id="filter-employee-select"
+                value={selectedEmployeeId}
+                onChange={(e) => setSelectedEmployeeId(e.target.value)}
                 className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
               >
-                {monthsList.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
+                <option value="all">All Employees ({employees.length})</option>
+                {employees.map((emp) => (
+                  <option key={emp.employeeId} value={emp.employeeId}>
+                    {emp.name}
                   </option>
                 ))}
               </select>
             </div>
+          )}
 
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs">
-              <span className="text-slate-500 font-semibold">Year:</span>
-              <select
-                id="filter-year-select"
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
-              >
-                <option value="All">All Years</option>
-                {yearsList.map((y) => (
-                  <option key={y} value={y}>
-                    {y}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {isCalendarAvailable && (
-              <div className="relative">
-                {/* Calendar Trigger Button */}
-                <button
-                  id="calendar-trigger-btn"
-                  type="button"
-                  onClick={() => setCalendarOpen((o) => !o)}
-                  className={`flex items-center gap-2 border rounded-xl px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
-                    selectedDay
-                      ? "bg-indigo-600 border-indigo-600 text-white"
-                      : "bg-slate-50 border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"
-                  }`}
-                >
-                  <Calendar className="h-3.5 w-3.5" />
-                  <span>
-                    {selectedDay
-                      ? selectedDay === todayStr
-                        ? `Today (${selectedDay})`
-                        : selectedDay
-                      : `${selectedMonth}, ${selectedYear}`}
-                  </span>
-                  {selectedDay && (
-                    <span
-                      role="button"
-                      onClick={(e) => { e.stopPropagation(); setSelectedDay(""); setCalendarOpen(false); }}
-                      className="ml-1 text-white/80 hover:text-white font-bold leading-none cursor-pointer"
-                      title="Clear date selection"
-                    >
-                      ×
-                    </span>
-                  )}
-                </button>
-
-                {/* Calendar Popup */}
-                {calendarOpen && (
-                  <div
-                    id="calendar-popup"
-                    className="absolute top-full mt-2 left-0 z-50 bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 w-72"
-                  >
-                    {/* Header */}
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-sm font-bold text-slate-800">
-                        {selectedMonth}, {selectedYear}
-                      </span>
-                    </div>
-
-                    {/* Day-of-week headers */}
-                    <div className="grid grid-cols-7 mb-1">
-                      {["Mo","Tu","We","Th","Fr","Sa","Su"].map((d) => (
-                        <div key={d} className="text-center text-[10px] font-bold text-slate-400 py-1">{d}</div>
-                      ))}
-                    </div>
-
-                    {/* Day cells */}
-                    <div className="grid grid-cols-7 gap-y-0.5">
-                      {calendarDays.map((cell) => {
-                        const isSelected = cell.date === selectedDay;
-                        return (
-                          <button
-                            key={cell.date}
-                            type="button"
-                            disabled={!cell.isCurrentMonth}
-                            onClick={() => {
-                              if (!cell.isCurrentMonth) return;
-                              setSelectedDay(cell.date === selectedDay ? "" : cell.date);
-                              setCalendarOpen(false);
-                            }}
-                            className={`relative h-8 w-full rounded-lg text-xs font-semibold transition flex flex-col items-center justify-center cursor-pointer disabled:cursor-default ${
-                              !cell.isCurrentMonth
-                                ? "text-slate-300"
-                                : isSelected
-                                ? "bg-slate-900 text-white"
-                                : cell.isToday
-                                ? "border-2 border-slate-900 text-slate-900 hover:bg-slate-100"
-                                : cell.hasBills
-                                ? "text-indigo-700 hover:bg-indigo-50"
-                                : "text-slate-600 hover:bg-slate-100"
-                            }`}
-                          >
-                            {cell.day}
-                            {/* Dot indicator for days with bills */}
-                            {cell.isCurrentMonth && cell.hasBills && !isSelected && (
-                              <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-indigo-500" />
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Footer */}
-                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
-                      <button
-                        type="button"
-                        onClick={() => { setSelectedDay(""); setCalendarOpen(false); }}
-                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer transition"
-                      >
-                        Clear
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (billsByDate[todayStr]) {
-                            setSelectedDay(todayStr);
-                          }
-                          setCalendarOpen(false);
-                        }}
-                        className="text-xs font-semibold text-slate-700 hover:text-slate-900 cursor-pointer transition"
-                      >
-                        Today
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs">
-              <Grid className="h-3.5 w-3.5 text-slate-400" />
-              <span className="text-slate-500 font-semibold">Density:</span>
-              <select
-                id="select-grid-density"
-                value={gridDensity}
-                onChange={(e) => setGridDensity(Number(e.target.value) as 9 | 12)}
-                className="bg-transparent font-bold text-indigo-700 focus:outline-none cursor-pointer"
-              >
-                <option value={9}>9 Images / Page (3x3 Grid)</option>
-                <option value={12}>12 Images / Page (3x4 Grid)</option>
-              </select>
-            </div>
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs">
+            <Calendar className="h-3.5 w-3.5 text-slate-400" />
+            <span className="text-slate-500 font-semibold">Month:</span>
+            <select
+              id="filter-month-select"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              {monthsList.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
           </div>
 
-          {/* Search Box */}
-          <div className="relative min-w-[220px]">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs">
+            <span className="text-slate-500 font-semibold">Year:</span>
+            <select
+              id="filter-year-select"
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              <option value="All">All Years</option>
+              {yearsList.map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+
+          {isCalendarAvailable && (
+            <div className="relative">
+              <button
+                id="calendar-trigger-btn"
+                type="button"
+                onClick={() => setCalendarOpen((o) => !o)}
+                className={`flex items-center gap-2 border rounded-xl px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${selectedDay
+                    ? "bg-indigo-600 border-indigo-600 text-white"
+                    : "bg-slate-50 border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50"
+                  }`}
+              >
+                <Calendar className="h-3.5 w-3.5" />
+                <span>
+                  {selectedDay
+                    ? selectedDay === todayStr
+                      ? `Today (${selectedDay})`
+                      : selectedDay
+                    : `${selectedMonth}, ${selectedYear}`}
+                </span>
+                {selectedDay && (
+                  <span
+                    role="button"
+                    onClick={(e) => { e.stopPropagation(); setSelectedDay(""); setCalendarOpen(false); }}
+                    className="ml-1 text-white/80 hover:text-white font-bold leading-none cursor-pointer"
+                    title="Clear date selection"
+                  >
+                    ×
+                  </span>
+                )}
+              </button>
+
+              {calendarOpen && (
+                <div
+                  id="calendar-popup"
+                  className="absolute top-full mt-2 left-0 z-50 bg-white rounded-2xl shadow-2xl border border-slate-200 p-4 w-72"
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-sm font-bold text-slate-800">
+                      {selectedMonth}, {selectedYear}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-7 mb-1">
+                    {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => (
+                      <div key={d} className="text-center text-[10px] font-bold text-slate-400 py-1">{d}</div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-y-0.5">
+                    {calendarDays.map((cell) => {
+                      const isSelected = cell.date === selectedDay;
+                      return (
+                        <button
+                          key={cell.date}
+                          type="button"
+                          disabled={!cell.isCurrentMonth}
+                          onClick={() => {
+                            if (!cell.isCurrentMonth) return;
+                            setSelectedDay(cell.date === selectedDay ? "" : cell.date);
+                            setCalendarOpen(false);
+                          }}
+                          className={`relative h-8 w-full rounded-lg text-xs font-semibold transition flex flex-col items-center justify-center cursor-pointer disabled:cursor-default ${!cell.isCurrentMonth
+                              ? "text-slate-300"
+                              : isSelected
+                                ? "bg-slate-900 text-white"
+                                : cell.isToday
+                                  ? "border-2 border-slate-900 text-slate-900 hover:bg-slate-100"
+                                  : cell.hasBills
+                                    ? "text-indigo-700 hover:bg-indigo-50"
+                                    : "text-slate-600 hover:bg-slate-100"
+                            }`}
+                        >
+                          {cell.day}
+                          {cell.isCurrentMonth && cell.hasBills && !isSelected && (
+                            <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-indigo-500" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => { setSelectedDay(""); setCalendarOpen(false); }}
+                      className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer transition"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (billsByDate[todayStr]) setSelectedDay(todayStr);
+                        setCalendarOpen(false);
+                      }}
+                      className="text-xs font-semibold text-slate-700 hover:text-slate-900 cursor-pointer transition"
+                    >
+                      Today
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs">
+            <Grid className="h-3.5 w-3.5 text-slate-400" />
+            <span className="text-slate-500 font-semibold">Density:</span>
+            <select
+              id="select-grid-density"
+              value={gridDensity}
+              onChange={(e) => setGridDensity(Number(e.target.value) as 9 | 12)}
+              className="bg-transparent font-bold text-indigo-700 focus:outline-none cursor-pointer"
+            >
+              <option value={9}>9 Images / Page (3x3 Grid)</option>
+              <option value={12}>12 Images / Page (3x4 Grid)</option>
+            </select>
+          </div>
+
+          {/* Search box — stretches to fill remaining space */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <input
               id="search-bills-input"
               type="text"
@@ -697,11 +677,10 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
           <button
             type="button"
             onClick={() => { setSelectedPaymentType("all"); setSelectedBillIds(new Set()); }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
-              selectedPaymentType === "all"
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${selectedPaymentType === "all"
                 ? "bg-slate-900 text-white shadow-xs"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            }`}
+              }`}
           >
             All Bills ({totalBillsCount})
           </button>
@@ -710,11 +689,10 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
             type="button"
             id="tab-advance-bills"
             onClick={() => { setSelectedPaymentType("advance"); setSelectedBillIds(new Set()); }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 border ${
-              selectedPaymentType === "advance"
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 border ${selectedPaymentType === "advance"
                 ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
                 : "bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100"
-            }`}
+              }`}
           >
             <Wallet className="h-3.5 w-3.5" />
             SW Advance Bills ({advanceBillsCount})
@@ -723,11 +701,10 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
           <button
             type="button"
             onClick={() => { setSelectedPaymentType("personal"); setSelectedBillIds(new Set()); }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 border ${
-              selectedPaymentType === "personal"
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 border ${selectedPaymentType === "personal"
                 ? "bg-indigo-600 text-white border-indigo-600 shadow-xs"
                 : "bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100"
-            }`}
+              }`}
           >
             Personal Bills ({personalBillsCount})
           </button>
@@ -735,11 +712,10 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
           <button
             type="button"
             onClick={() => { setSelectedPaymentType("sw_direct"); setSelectedBillIds(new Set()); }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 border ${
-              selectedPaymentType === "sw_direct"
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 border ${selectedPaymentType === "sw_direct"
                 ? "bg-purple-600 text-white border-purple-600 shadow-xs"
                 : "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"
-            }`}
+              }`}
           >
             Direct SW Bills ({directSwBillsCount})
           </button>
@@ -869,9 +845,8 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
               return (
                 <div
                   key={`${bill.expenseId}_${bill.billId}_${index}`}
-                  className={`group relative rounded-2xl border transition overflow-hidden bg-white shadow-xs hover:shadow-md flex flex-col ${
-                    isSelected ? "border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/10" : "border-slate-200 hover:border-slate-300"
-                  }`}
+                  className={`group relative rounded-2xl border transition overflow-hidden bg-white shadow-xs hover:shadow-md flex flex-col ${isSelected ? "border-indigo-500 ring-2 ring-indigo-500/20 bg-indigo-50/10" : "border-slate-200 hover:border-slate-300"
+                    }`}
                 >
                   {/* Card Header Label */}
                   <div className="p-3 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
@@ -931,19 +906,23 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
                       >
                         <Eye className="h-3.5 w-3.5 text-indigo-600" /> Preview
                       </button>
-                      {(isAdmin || bill.employeeId === user.employeeId) && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const targetExp = expenses.find(e => e.id === bill.expenseId);
-                            if (targetExp) setEditingExpense(targetExp);
-                          }}
-                          className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
-                          title="Edit Expense Data & Bills"
-                        >
-                          <Edit3 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
+                      {(() => {
+                        const targetExp = expenses.find(e => e.id === bill.expenseId);
+                        const isLocked = targetExp && (targetExp.verificationStatus === "verified" || targetExp.status === "approved" || targetExp.status === "reimbursed");
+                        if (!isAdmin && isLocked) return null;
+                        return (isAdmin || bill.employeeId === user.employeeId) ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (targetExp) setEditingExpense(targetExp);
+                            }}
+                            className="p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition cursor-pointer"
+                            title="Edit Expense Data & Bills"
+                          >
+                            <Edit3 className="h-3.5 w-3.5" />
+                          </button>
+                        ) : null;
+                      })()}
                       {isAdmin && (
                         <button
                           type="button"
@@ -974,13 +953,12 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
 
                     <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-50">
                       <span className="font-semibold text-slate-400">Payment:</span>
-                      <span className={`px-1.5 py-0.5 rounded font-bold text-[9px] ${
-                        bill.paymentMethod?.includes("SW Payment")
+                      <span className={`px-1.5 py-0.5 rounded font-bold text-[9px] ${bill.paymentMethod?.includes("SW Payment")
                           ? "bg-purple-50 text-purple-700 border border-purple-100"
                           : bill.paymentMethod?.includes("Personal Payment")
-                          ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
-                          : "bg-slate-100 text-slate-700"
-                      }`}>
+                            ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
+                            : "bg-slate-100 text-slate-700"
+                        }`}>
                         {bill.paymentMethod || "Personal Payment"}
                       </span>
                     </div>
@@ -1170,17 +1148,18 @@ export default function BillDocumentHub({ user, refreshTrigger = 0 }: BillDocume
 
 
       {/* Edit Expense Modal */}
-
-      <EditExpenseModal
-        expense={editingExpense}
-        currentUser={user}
-        isOpen={!!editingExpense}
-        onClose={() => setEditingExpense(null)}
-        onSuccess={() => {
-          setEditingExpense(null);
-          fetchInitialData();
-        }}
-      />
+      {editingExpense && (
+        <EditExpenseModal
+          expense={editingExpense}
+          currentUser={user}
+          isOpen={!!editingExpense}
+          onClose={() => setEditingExpense(null)}
+          onSuccess={() => {
+            setEditingExpense(null);
+            fetchInitialData();
+          }}
+        />
+      )}
     </div>
   );
 }

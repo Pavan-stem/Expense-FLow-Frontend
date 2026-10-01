@@ -280,40 +280,6 @@ export default function EmployeeDashboard({ user, onNavigateToSubmit, onNavigate
         </div>
       </div>
 
-      {/* Advance Wallet Summary Banner */}
-      {advanceSummary.totalAdvance > 0 && (
-        <div className="bg-gradient-to-r from-emerald-950 via-teal-950 to-slate-900 p-4 sm:p-5 rounded-3xl text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm border border-emerald-800/40">
-          <div className="flex items-center gap-3.5">
-            <div className="p-3 bg-emerald-500/20 text-emerald-400 rounded-2xl border border-emerald-500/30">
-              <Wallet className="h-6 w-6" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] uppercase font-bold text-emerald-300 tracking-wider">Company Advance Balance</span>
-                <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-full text-[9px] font-bold">Active</span>
-              </div>
-              <div className="flex items-baseline gap-3 mt-0.5">
-                <span className="text-xl sm:text-2xl font-black font-mono text-white">
-                  ₹{advanceSummary.availableBalance.toFixed(2)}
-                </span>
-                <span className="text-xs text-slate-400">
-                  (Used: ₹{advanceSummary.totalUsed.toFixed(2)} of ₹{advanceSummary.totalAdvance.toFixed(2)})
-                </span>
-              </div>
-            </div>
-          </div>
-          {onNavigateToAdvances && (
-            <button
-              type="button"
-              onClick={onNavigateToAdvances}
-              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer self-start sm:self-auto shrink-0 shadow-xs"
-            >
-              View Statement →
-            </button>
-          )}
-        </div>
-      )}
-
       {/* Metrics Row */}
       {/* Metrics Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">

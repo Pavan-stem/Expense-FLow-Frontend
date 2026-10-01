@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { 
-  getExpenses, 
-  getExpensesByEmployee, 
+import {
+  getExpenses,
+  getExpensesByEmployee,
   subscribeToExpenses,
   subscribeToExpensesByEmployee,
-  updateExpense, 
+  updateExpense,
   deleteExpense,
+  verifyExpense,
 
   getCategories,
   createNotification,
@@ -14,8 +15,9 @@ import {
   deleteVoucherComment,
   clearVoucherCommentsForMonth,
   markExpenseNotificationsAsRead,
-  type EmployeeProfile, 
-  type Expense, 
+  markAllUserNotificationsAsRead,
+  type EmployeeProfile,
+  type Expense,
   type ExpenseCategory,
   type BillFile,
   type VoucherComment,
@@ -23,27 +25,28 @@ import {
   isAdvancePaymentMethod,
   isPersonalPaymentMethod
 } from "../lib/firebase";
-import { 
-  collectBillItems, 
-  exportBillsToWordDocx, 
-  exportBillsToPDF 
+import {
+  collectBillItems,
+  exportBillsToWordDocx,
+  exportBillsToPDF
 } from "../lib/billDocumentGenerator";
 import EditExpenseModal from "./EditExpenseModal";
-import { 
-  Search, 
-  Filter, 
+import {
+  Search,
+  Filter,
   ChevronRight,
   ChevronLeft,
   ArrowLeft,
-  CheckCircle, 
-  XCircle, 
-  Clock, 
-  AlertCircle, 
-  Download, 
-  Trash2, 
-  Edit3, 
-  Eye, 
-  FileText, 
+  CheckCircle,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  AlertCircle,
+  Download,
+  Trash2,
+  Edit3,
+  Eye,
+  FileText,
   RefreshCw,
   FolderMinus,
   Check,
@@ -55,8 +58,10 @@ import {
   RotateCcw,
   RotateCw,
   MessageSquare,
-
-  Send
+  Flag,
+  ShieldCheck,
+  Send,
+  Lock
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -98,7 +103,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
   const [adminActionLoading, setAdminActionLoading] = useState(false);
   const [activeActionStatus, setActiveActionStatus] = useState<string | null>(null);
   const [adminComment, setAdminComment] = useState("");
-  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [toast, setToast] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null);
 
   // Single expense export loading
   const [singleDocLoading, setSingleDocLoading] = useState(false);
@@ -117,6 +122,12 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterPaymentMode, setFilterPaymentMode] = useState("");
+  const [filterVerif, setFilterVerif] = useState("");
+
+  // Verifier Actions state
+  const [verifierActionLoading, setVerifierActionLoading] = useState(false);
+  const [flagModalOpen, setFlagModalOpen] = useState(false);
+  const [flagComment, setFlagComment] = useState("");
 
   // Track viewed expense timestamps to manage unread badges
   const [viewedExpenseTimestamps, setViewedExpenseTimestamps] = useState<Record<string, number>>(() => {
@@ -128,7 +139,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
     }
   });
 
-  const showToast = (type: "success" | "error", message: string) => {
+  const showToast = (type: "success" | "error" | "info", message: string) => {
     setToast({ type, message });
     setTimeout(() => {
       setToast(null);
@@ -224,7 +235,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
   const handleMouseUpOrLeave = () => {
     setIsPanning(false);
   };
-  
+
 
   const markExpenseAsViewed = React.useCallback((expenseId: string, voucherNumber?: string) => {
     const now = Date.now();
@@ -259,18 +270,20 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
   };
 
 
+  const isElevated = user.role === "admin" || user.role === "verifier";
+
   // Fetch all data
   const fetchData = async () => {
     setLoading(true);
     try {
       let data: Expense[] = [];
-      if (user.role === "admin") {
+      if (isElevated) {
         data = await getExpenses();
       } else {
         data = await getExpensesByEmployee(user.employeeId);
       }
       setExpenses(data);
-      
+
       const cats = await getCategories();
       setCategories(cats);
     } catch (err) {
@@ -282,20 +295,112 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
 
   useEffect(() => {
     setLoading(true);
-    const unsub = user.role === "admin"
+    // Clear notifications for employee when opening My Expenses
+    if (user.role === "employee") {
+      markAllUserNotificationsAsRead(user.employeeId);
+    }
+
+    const unsub = isElevated
       ? subscribeToExpenses((updatedData) => {
-          setExpenses(updatedData);
-          setLoading(false);
-        })
+        setExpenses(updatedData);
+        setLoading(false);
+      })
       : subscribeToExpensesByEmployee(user.employeeId, (updatedData) => {
-          setExpenses(updatedData);
-          setLoading(false);
-        });
+        setExpenses(updatedData);
+        setLoading(false);
+      });
 
     getCategories().then(cats => setCategories(cats));
 
     return () => unsub();
-  }, [user.employeeId, user.role, refreshTrigger]);
+  }, [user.employeeId, user.role, isElevated, refreshTrigger]);
+
+  // Verifier Actions
+  const handleVerifyClaim = async (expense: Expense, comment?: string) => {
+    setVerifierActionLoading(true);
+    try {
+      await verifyExpense(
+        expense.id,
+        "verified",
+        user.employeeId,
+        user.name,
+        comment
+      );
+      // Mark notification for this voucher as read for verifier
+      markExpenseNotificationsAsRead(user.employeeId, expense.id, expense.voucherNumber);
+      showToast("success", `✓ Voucher ${expense.voucherNumber || expense.title} verified and forwarded to Admin.`);
+      setExpenses(prev => prev.map(e => e.id === expense.id ? {
+        ...e,
+        verificationStatus: "verified",
+        verifiedBy: user.employeeId,
+        verifiedByName: user.name,
+        verifiedAt: new Date().toISOString(),
+        status: "under_review"
+      } : e));
+      if (selectedExpense?.id === expense.id) {
+        setSelectedExpense(prev => prev ? {
+          ...prev,
+          verificationStatus: "verified",
+          verifiedBy: user.employeeId,
+          verifiedByName: user.name,
+          verifiedAt: new Date().toISOString(),
+          status: "under_review"
+        } : null);
+      }
+    } catch (err: any) {
+      console.error("Verification error:", err);
+      showToast("error", `Failed to verify: ${err?.message || "Unknown error"}`);
+    } finally {
+      setVerifierActionLoading(false);
+    }
+  };
+
+  const handleFlagClaim = async (expense: Expense, reason: string) => {
+    if (!reason.trim()) {
+      alert("Please provide remarks for verification pending.");
+      return;
+    }
+    setVerifierActionLoading(true);
+    try {
+      await verifyExpense(
+        expense.id,
+        "flagged",
+        user.employeeId,
+        user.name,
+        reason.trim()
+      );
+      // Mark notification for this voucher as read for verifier
+      markExpenseNotificationsAsRead(user.employeeId, expense.id, expense.voucherNumber);
+      showToast("info", `⏳ Voucher ${expense.voucherNumber || expense.title} marked as Verification Pending.`);
+      setExpenses(prev => prev.map(e => e.id === expense.id ? {
+        ...e,
+        verificationStatus: "flagged",
+        verifiedBy: user.employeeId,
+        verifiedByName: user.name,
+        verifierComments: reason.trim(),
+        verifiedAt: new Date().toISOString(),
+        status: "pending"
+      } : e));
+      if (selectedExpense?.id === expense.id) {
+        setSelectedExpense(prev => prev ? {
+          ...prev,
+          verificationStatus: "flagged",
+          verifiedBy: user.employeeId,
+          verifiedByName: user.name,
+          verifierComments: reason.trim(),
+          verifiedAt: new Date().toISOString(),
+          status: "pending"
+        } : null);
+      }
+      setFlagModalOpen(false);
+      setFlagComment("");
+    } catch (err: any) {
+      console.error("Flag error:", err);
+      showToast("error", `Failed to flag: ${err?.message || "Unknown error"}`);
+    } finally {
+      setVerifierActionLoading(false);
+    }
+  };
 
 
   // Auto-open target expense if navigated via notification
@@ -394,6 +499,9 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
         adminComments: commentToSave || undefined
       }, user.employeeId, user.name);
 
+      // Mark notification for this voucher as read for admin
+      markExpenseNotificationsAsRead(user.employeeId, expense.id, expense.voucherNumber);
+
       // Create notification for employee
       await createNotification(
         expense.employeeId,
@@ -404,21 +512,21 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       );
 
       // Locally update state
-      setExpenses(prev => prev.map(e => e.id === expense.id ? { 
-        ...e, 
-        status: newStatus, 
-        adminComments: commentToSave || undefined 
+      setExpenses(prev => prev.map(e => e.id === expense.id ? {
+        ...e,
+        status: newStatus,
+        adminComments: commentToSave || undefined
       } : e));
-      
+
       // Update selected expense modal
       if (selectedExpense?.id === expense.id) {
-        setSelectedExpense(prev => prev ? { 
-          ...prev, 
-          status: newStatus, 
-          adminComments: commentToSave || undefined 
+        setSelectedExpense(prev => prev ? {
+          ...prev,
+          status: newStatus,
+          adminComments: commentToSave || undefined
         } : null);
       }
-      
+
       setAdminComment("");
       showToast("success", `✓ Status updated to '${newStatus.replace('_', ' ').toUpperCase()}' successfully for voucher ${expense.voucherNumber || expense.title}.`);
     } catch (err) {
@@ -442,6 +550,9 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
             adminComments: "Bulk approved."
           }, user.employeeId, user.name);
 
+          // Mark notification for this voucher as read for admin
+          markExpenseNotificationsAsRead(user.employeeId, exp.id, exp.voucherNumber);
+
           await createNotification(
             exp.employeeId,
             "Expense Claim APPROVED",
@@ -450,12 +561,12 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
         }
       }
 
-      setExpenses(prev => prev.map(e => selectedIds.includes(e.id) ? { 
-        ...e, 
-        status: "approved" as const, 
-        adminComments: "Bulk approved." 
+      setExpenses(prev => prev.map(e => selectedIds.includes(e.id) ? {
+        ...e,
+        status: "approved" as const,
+        adminComments: "Bulk approved."
       } : e));
-      
+
       setSelectedIds([]);
     } catch (err) {
       console.error("Bulk approval error:", err);
@@ -505,7 +616,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       setPreviewingBill(bill);
       return;
     }
-    
+
     setLoadingBillId(bill.id);
     try {
       const fullData = await getBillData(selectedExpense.id, bill.id);
@@ -537,7 +648,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       }
       setLoadingBillId(null);
     }
-    
+
     const link = document.createElement("a");
     link.href = data;
     link.download = bill.fileName;
@@ -611,9 +722,15 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       if (!matchTitle && !matchVendor && !matchEmp) return false;
     }
 
-    // Role Specific Filter
-    if (user.role === "admin" && filterEmployee) {
+    // Role Specific Filter (Admin & Verifier)
+    if (isElevated && filterEmployee) {
       if ((exp.employeeName || "").trim().toLowerCase() !== filterEmployee.toLowerCase()) return false;
+    }
+
+    // Verification Status Filter
+    if (filterVerif) {
+      const v = exp.verificationStatus || "pending";
+      if (v !== filterVerif) return false;
     }
 
     // Category
@@ -735,7 +852,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       const paidTo = exp.vendor || exp.title || "";
       const paymentMethod = exp.paymentMethod || "UPI";
       const amount = exp.totalAmount || exp.amount || 0;
-      
+
       let approval = "Pending";
       if (exp.status === "approved" || exp.status === "reimbursed") {
         approval = "Approved";
@@ -747,10 +864,10 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       const methodOfPayment = exp.paymentMethod?.includes("SW Payment")
         ? "SW Payment"
         : exp.paymentMethod?.includes("Personal Payment")
-        ? "Personal Payment"
-        : (paymentMethod === "Bank Transfer" || paymentMethod === "Credit Card")
-        ? "SW Payment"
-        : "Personal Payment";
+          ? "Personal Payment"
+          : (paymentMethod === "Bank Transfer" || paymentMethod === "Credit Card")
+            ? "SW Payment"
+            : "Personal Payment";
       const swPaymentStatus = exp.status === "reimbursed" ? "Paid" : exp.status === "approved" ? "Approved" : "";
 
       return [
@@ -767,9 +884,9 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       ];
     });
 
-    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" 
+    const csvContent = "data:text/csv;charset=utf-8,\uFEFF"
       + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-    
+
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -789,20 +906,23 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
             initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className={`fixed top-5 right-5 z-[120] max-w-md px-5 py-3.5 rounded-2xl shadow-2xl border flex items-center gap-3 backdrop-blur-md ${
-              toast.type === "success" 
-                ? "bg-emerald-900/95 text-emerald-100 border-emerald-700/80 shadow-emerald-900/30" 
-                : "bg-rose-900/95 text-rose-100 border-rose-700/80 shadow-rose-900/30"
-            }`}
+            className={`fixed top-5 right-5 z-[120] max-w-md px-5 py-3.5 rounded-2xl shadow-2xl border flex items-center gap-3 backdrop-blur-md ${toast.type === "success"
+              ? "bg-emerald-900/95 text-emerald-100 border-emerald-700/80 shadow-emerald-900/30"
+              : toast.type === "info"
+              ? "bg-amber-900/95 text-amber-100 border-amber-700/80 shadow-amber-900/30"
+              : "bg-rose-900/95 text-rose-100 border-rose-700/80 shadow-rose-900/30"
+              }`}
           >
             {toast.type === "success" ? (
               <CheckCircle className="h-5 w-5 text-emerald-400 flex-shrink-0" />
+            ) : toast.type === "info" ? (
+              <Clock className="h-5 w-5 text-amber-400 flex-shrink-0" />
             ) : (
               <AlertCircle className="h-5 w-5 text-rose-400 flex-shrink-0" />
             )}
             <span className="text-xs font-bold font-sans tracking-wide leading-tight">{toast.message}</span>
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={() => setToast(null)}
               className="ml-auto text-slate-300 hover:text-white transition p-1 cursor-pointer"
             >
@@ -829,9 +949,11 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
           )}
           <div>
             <h2 className="text-xl font-bold text-slate-900 font-sans">
-              {user.role === "admin" ? "Employee Expense Claim Hub" : "My Submitted Expense Claims"}
+              {user.role === "admin" ? "Employee Expense Claim Hub" : user.role === "verifier" ? "Expense Queue" : "My Submitted Expense Claims"}
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">Filter, audit, view receipts, and update claim statuses.</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {user.role === "verifier" ? "Inspect voucher receipts and verify employee claims for administrator approval." : "Filter, audit, view receipts, and update claim statuses."}
+            </p>
           </div>
         </div>
 
@@ -859,96 +981,120 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
 
       {/* Filters Panel */}
       <div id="filters-panel" className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm space-y-4">
-        <div className="flex items-center gap-2 border-b border-slate-50 pb-3 mb-2">
-          <Filter className="h-4 w-4 text-indigo-600" />
-          <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Search & Filters</span>
-        </div>
-
-        <div className={`grid grid-cols-1 sm:grid-cols-2 ${user.role === "admin" ? "md:grid-cols-3" : "md:grid-cols-2"} gap-4`}>
-          {/* Search bar */}
-          <div className="relative">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Search box — grows to fill remaining space */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <input
               id="filter-search-query"
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search title, vendor, invoice..."
-              className="pl-9 pr-3.5 py-2 w-full border border-slate-200 rounded-xl text-slate-900 bg-slate-50 text-xs focus:bg-white focus:ring-1 focus:ring-indigo-500 outline-none transition"
+              className="w-full pl-9 pr-3.5 py-2 border border-slate-200 rounded-xl text-slate-900 bg-slate-50 text-xs focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition"
             />
           </div>
 
-          {/* Employee Filter (Admin Only) */}
-          {user.role === "admin" && (
-            <select
-              id="filter-employee-select"
-              value={filterEmployee}
-              onChange={(e) => setFilterEmployee(e.target.value)}
-              className="px-3 py-2 w-full border border-slate-200 rounded-xl text-slate-900 bg-slate-50 text-xs focus:bg-white focus:ring-1 focus:ring-indigo-500 outline-none transition"
-            >
-              <option value="">All Employees</option>
-              {uniqueEmployees.map(emp => (
-                <option key={emp.id} value={emp.id}>{emp.name}</option>
-              ))}
-            </select>
+          {/* Employee Filter (Admin & Verifier) */}
+          {isElevated && (
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+              <Filter className="h-3.5 w-3.5 text-slate-400" />
+              <span className="text-slate-500 font-semibold">Employee:</span>
+              <select
+                id="filter-employee-select"
+                value={filterEmployee}
+                onChange={(e) => setFilterEmployee(e.target.value)}
+                className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+              >
+                <option value="">All Employees</option>
+                {uniqueEmployees.map(emp => (
+                  <option key={emp.id} value={emp.id}>{emp.name}</option>
+                ))}
+              </select>
+            </div>
           )}
 
           {/* Status Filter */}
-          <select
-            id="filter-status-select"
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
-            className="px-3 py-2 w-full border border-slate-200 rounded-xl text-slate-900 bg-slate-50 text-xs focus:bg-white focus:ring-1 focus:ring-indigo-500 outline-none transition"
-          >
-            <option value="">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="under_review">Under Review</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-            <option value="reimbursed">Reimbursed</option>
-          </select>
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            <span className="text-slate-500 font-semibold">Status:</span>
+            <select
+              id="filter-status-select"
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              <option value="">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="under_review">Under Review</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+              <option value="reimbursed">Reimbursed</option>
+            </select>
+          </div>
+
+          {/* Verification Status Filter */}
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            <span className="text-slate-500 font-semibold">Verification:</span>
+            <select
+              id="filter-verification-select"
+              value={filterVerif}
+              onChange={(e) => setFilterVerif(e.target.value)}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              <option value="">All Verification</option>
+              <option value="pending">Awaiting Verification</option>
+              <option value="verified">Verified</option>
+              <option value="flagged">Flagged</option>
+            </select>
+          </div>
 
           {/* Payment Mode Filter */}
-          <select
-            id="filter-payment-mode-select"
-            value={filterPaymentMode}
-            onChange={(e) => setFilterPaymentMode(e.target.value)}
-            className="px-3 py-2 w-full border border-slate-200 rounded-xl text-slate-900 bg-slate-50 text-xs focus:bg-white focus:ring-1 focus:ring-indigo-500 outline-none transition font-semibold"
-          >
-            <option value="">All Payment Modes</option>
-            <option value="advance">🟢 SW Advance Claims</option>
-            <option value="sw_direct">🟣 Direct SW Payments</option>
-            <option value="personal">🔵 Personal Payments</option>
-          </select>
-        </div>
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            <span className="text-slate-500 font-semibold">Payment:</span>
+            <select
+              id="filter-payment-mode-select"
+              value={filterPaymentMode}
+              onChange={(e) => setFilterPaymentMode(e.target.value)}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              <option value="">All Payment Modes</option>
+              <option value="advance">🟢 SW Advance Claims</option>
+              <option value="sw_direct">🟣 Direct SW Payments</option>
+              <option value="personal">🔵 Personal Payments</option>
+            </select>
+          </div>
 
-        {/* Advanced Month Filters Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
           {/* Year Filter */}
-          <select
-            id="filter-year-select"
-            value={filterYear}
-            onChange={(e) => setFilterYear(e.target.value)}
-            className="px-3 py-2 w-full border border-slate-200 rounded-xl text-slate-900 bg-slate-50 text-xs focus:bg-white focus:ring-1 focus:ring-indigo-500 outline-none transition"
-          >
-            <option value="">All Years</option>
-            {yearsList.map(y => (
-              <option key={y} value={y}>{y}</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            <span className="text-slate-500 font-semibold">Year:</span>
+            <select
+              id="filter-year-select"
+              value={filterYear}
+              onChange={(e) => setFilterYear(e.target.value)}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              <option value="">All Years</option>
+              {yearsList.map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
 
           {/* Month Filter */}
-          <select
-            id="filter-month-select"
-            value={filterMonth}
-            onChange={(e) => setFilterMonth(e.target.value)}
-            className="px-3 py-2 w-full border border-slate-200 rounded-xl text-slate-900 bg-slate-50 text-xs focus:bg-white focus:ring-1 focus:ring-indigo-500 outline-none transition"
-          >
-            <option value="">All Months</option>
-            {monthsList.map(m => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs">
+            <span className="text-slate-500 font-semibold">Month:</span>
+            <select
+              id="filter-month-select"
+              value={filterMonth}
+              onChange={(e) => setFilterMonth(e.target.value)}
+              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer"
+            >
+              <option value="">All Months</option>
+              {monthsList.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
@@ -1004,7 +1150,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                   )}
                   <th className="py-4 px-4 font-sans">Date</th>
                   <th className="py-4 px-4 font-sans">Voucher No.</th>
-                  {user.role === "admin" && <th className="py-4 px-4 font-sans">Employee</th>}
+                  {isElevated && <th className="py-4 px-4 font-sans">Employee</th>}
                   <th className="py-4 px-4 font-sans">Type of Expense</th>
                   <th className="py-4 px-4 font-sans">Paid to</th>
                   <th className="py-4 px-4 font-sans">Payment Method</th>
@@ -1039,7 +1185,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                     <td className="py-3.5 px-4 font-mono font-bold text-indigo-600 whitespace-nowrap">
                       {exp.voucherNumber || "—"}
                     </td>
-                    {user.role === "admin" && (
+                    {isElevated && (
                       <td className="py-3.5 px-4 font-semibold text-slate-800 whitespace-nowrap">
                         {exp.employeeName}
                       </td>
@@ -1051,15 +1197,14 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                       {exp.vendor}
                     </td>
                     <td className="py-3.5 px-4 whitespace-nowrap">
-                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border uppercase font-mono tracking-wider ${
-                        isAdvancePaymentMethod(exp.paymentMethod, exp.paymentSource)
-                          ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                          : exp.paymentMethod?.includes("SW Payment")
+                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border uppercase font-mono tracking-wider ${isAdvancePaymentMethod(exp.paymentMethod, exp.paymentSource)
+                        ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+                        : exp.paymentMethod?.includes("SW Payment")
                           ? "bg-purple-50 text-purple-700 border-purple-200"
                           : exp.paymentMethod?.includes("Personal Payment")
-                          ? "bg-indigo-50 text-indigo-700 border-indigo-200"
-                          : "bg-slate-100 text-slate-700 border-slate-200"
-                      }`}>
+                            ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                            : "bg-slate-100 text-slate-700 border-slate-200"
+                        }`}>
                         {exp.paymentMethod || "Personal Payment"}
                       </span>
                     </td>
@@ -1067,7 +1212,18 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                       ₹{exp.totalAmount.toFixed(2)}
                     </td>
                     <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                      {getStatusBadge(exp.status)}
+                      <div className="flex flex-col items-center gap-1">
+                        {getStatusBadge(exp.status)}
+                        {exp.verificationStatus === "verified" ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <CheckCircle2 className="h-2.5 w-2.5" /> Verified
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                            <Clock className="h-2.5 w-2.5" /> Not Verified
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-3.5 px-6 text-center whitespace-nowrap">
                       <div className="flex items-center justify-center gap-2">
@@ -1087,8 +1243,8 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                             </span>
                           )}
                         </button>
-                        
-                        {(user.role === "admin" || exp.employeeId === user.employeeId) && (
+
+                        {user.role === "admin" ? (
                           <>
                             <button
                               id={`edit-claim-btn-${exp.id}`}
@@ -1107,7 +1263,41 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </>
-                        )}
+                        ) : exp.employeeId === user.employeeId ? (
+                          (() => {
+                            const isLocked = exp.verificationStatus === "verified" || exp.status === "approved" || exp.status === "reimbursed";
+                            if (isLocked) {
+                              return (
+                                <span
+                                  className="p-1.5 text-slate-300 rounded-lg border border-slate-100 bg-slate-50 flex items-center justify-center cursor-not-allowed"
+                                  title="Editing locked: Voucher is verified or approved"
+                                >
+                                  <Lock className="h-3.5 w-3.5 text-slate-300" />
+                                </span>
+                              );
+                            }
+                            return (
+                              <>
+                                <button
+                                  id={`edit-claim-btn-${exp.id}`}
+                                  onClick={() => setEditingExpense(exp)}
+                                  className="p-1.5 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg border border-slate-100 bg-white transition shadow-sm cursor-pointer"
+                                  title="Edit Claim & Bills"
+                                >
+                                  <Edit3 className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                  id={`delete-claim-btn-${exp.id}`}
+                                  onClick={() => handleDelete(exp)}
+                                  className="p-1.5 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg border border-slate-100 bg-white transition shadow-sm cursor-pointer"
+                                  title="Delete Claim"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </>
+                            );
+                          })()
+                        ) : null}
 
                       </div>
                     </td>
@@ -1147,7 +1337,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {(user.role === "admin" || selectedExpense.employeeId === user.employeeId) && (
+                  {user.role === "admin" ? (
                     <button
                       id="modal-edit-claim-btn"
                       onClick={() => {
@@ -1160,7 +1350,35 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                     >
                       <Edit3 className="h-3.5 w-3.5" /> Edit Claim
                     </button>
-                  )}
+                  ) : selectedExpense.employeeId === user.employeeId ? (
+                    (() => {
+                      const isLocked = selectedExpense.verificationStatus === "verified" || selectedExpense.status === "approved" || selectedExpense.status === "reimbursed";
+                      if (isLocked) {
+                        return (
+                          <span
+                            className="px-2.5 py-1 text-[11px] font-bold text-slate-400 bg-slate-100 border border-slate-200 rounded-xl flex items-center gap-1"
+                            title="Editing locked: Voucher is verified or approved"
+                          >
+                            <Lock className="h-3 w-3 text-slate-400" /> Locked
+                          </span>
+                        );
+                      }
+                      return (
+                        <button
+                          id="modal-edit-claim-btn"
+                          onClick={() => {
+                            const targetExp = selectedExpense;
+                            setSelectedExpense(null);
+                            setEditingExpense(targetExp);
+                          }}
+                          className="px-3 py-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                          title="Edit Claim Data & Bills"
+                        >
+                          <Edit3 className="h-3.5 w-3.5" /> Edit Claim
+                        </button>
+                      );
+                    })()
+                  ) : null}
                   <button
                     id="close-claim-modal-btn"
                     onClick={() => setSelectedExpense(null)}
@@ -1218,15 +1436,14 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                       <div><span className="font-semibold text-slate-400">Paid to:</span> {selectedExpense.vendor}</div>
                       <div>
                         <span className="font-semibold text-slate-400">Payment:</span>{" "}
-                        <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold ${
-                          isAdvancePaymentMethod(selectedExpense.paymentMethod, selectedExpense.paymentSource)
-                            ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
-                            : selectedExpense.paymentMethod?.includes("SW Payment")
+                        <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-bold ${isAdvancePaymentMethod(selectedExpense.paymentMethod, selectedExpense.paymentSource)
+                          ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                          : selectedExpense.paymentMethod?.includes("SW Payment")
                             ? "bg-purple-50 text-purple-700 border border-purple-100"
                             : selectedExpense.paymentMethod?.includes("Personal Payment")
-                            ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
-                            : "text-slate-800"
-                        }`}>
+                              ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
+                              : "text-slate-800"
+                          }`}>
                           {selectedExpense.paymentMethod}
                         </span>
                       </div>
@@ -1282,7 +1499,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                               <p className="text-[10px] text-slate-400 font-mono uppercase">{bill.fileType.split("/")[1] || "File"}</p>
                             </div>
                           </div>
-                          
+
                           <div className="flex items-center gap-1.5">
                             <button
                               id={`preview-receipt-bill-${bill.id}`}
@@ -1367,8 +1584,8 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                         ) : (
                           <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
                             {currentMonthComments.map(cmt => (
-                              <div 
-                                key={cmt.id} 
+                              <div
+                                key={cmt.id}
                                 className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/80 text-slate-900 text-xs space-y-1.5"
                               >
                                 <div className="flex items-center justify-between">
@@ -1415,8 +1632,8 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                         }
                       }}
                       placeholder={
-                        user.role === "admin" 
-                          ? "Write a comment or point out doubts about this bill... (Press Enter to send)" 
+                        user.role === "admin"
+                          ? "Write a comment or point out doubts about this bill... (Press Enter to send)"
                           : "Type a response or clarify doubts for the admin... (Press Enter to send)"
                       }
                       rows={2}
@@ -1523,6 +1740,72 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                 </div>
               )}
 
+              {/* Verifier Action Panel */}
+              {user.role === "verifier" && (
+                <div id="verifier-specification-actions" className="p-6 bg-slate-50 border-t border-slate-100 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                        <span className="text-xs font-bold text-slate-700 uppercase tracking-widest">
+                          Verifier Audit Action
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Verify that the claimed amount (<strong className="text-slate-800 font-mono">₹{selectedExpense.totalAmount.toFixed(2)}</strong>) matches the digital receipt documents above.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {selectedExpense.verificationStatus === "verified" ? (
+                        <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-xl text-emerald-800 text-xs font-bold shadow-2xs">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                          <span>Verified by {selectedExpense.verifiedByName || "Verifier"}</span>
+                        </div>
+                      ) : selectedExpense.verificationStatus === "flagged" ? (
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-3.5 py-2 rounded-xl text-amber-800 text-xs font-bold">
+                            <Clock className="h-4 w-4 text-amber-600" />
+                            <span>Verification Pending</span>
+                          </div>
+                          <button
+                            id="verifier-verify-claim-btn"
+                            type="button"
+                            onClick={() => handleVerifyClaim(selectedExpense)}
+                            disabled={verifierActionLoading}
+                            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-sm cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                          >
+                            {verifierActionLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                            Verify Claim
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            id="verifier-flag-claim-btn"
+                            type="button"
+                            onClick={() => { setFlagComment(""); setFlagModalOpen(true); }}
+                            className="px-4 py-2 bg-white hover:bg-amber-50 border border-amber-300 text-amber-700 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5"
+                          >
+                            <Clock className="h-3.5 w-3.5" /> Verification Pending
+                          </button>
+                          <button
+                            id="verifier-verify-claim-btn"
+                            type="button"
+                            onClick={() => handleVerifyClaim(selectedExpense)}
+                            disabled={verifierActionLoading}
+                            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-sm cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                          >
+                            {verifierActionLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                            Verify Claim
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
             </motion.div>
           </>
         )}
@@ -1532,10 +1815,10 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       <AnimatePresence>
         {previewingBill && (
           <>
-            <div 
-              id="list-receipt-preview-backdrop" 
-              className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[80] flex items-center justify-center p-3 md:p-6" 
-              onClick={() => setPreviewingBill(null)} 
+            <div
+              id="list-receipt-preview-backdrop"
+              className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[80] flex items-center justify-center p-3 md:p-6"
+              onClick={() => setPreviewingBill(null)}
             />
 
 
@@ -1592,7 +1875,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                   </button>
                 </div>
               </div>
-              <div 
+              <div
                 className="flex-1 bg-slate-100 p-4 pb-16 flex items-center justify-center overflow-hidden relative"
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
@@ -1668,9 +1951,9 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
 
                     {/* Floating Zoom & Rotation Controls specifically for this image viewport */}
                     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3 py-1.5 bg-white/90 backdrop-blur-md rounded-2xl border border-slate-200/80 shadow-lg z-10 select-none">
-                      <button 
+                      <button
                         type="button"
-                        onClick={handleZoomOut} 
+                        onClick={handleZoomOut}
                         className="p-1 hover:bg-slate-200/80 text-slate-600 rounded-lg transition cursor-pointer"
                         title="Zoom Out"
                       >
@@ -1679,9 +1962,9 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                       <span className="text-[10px] font-bold font-mono text-slate-500 min-w-[2.5rem] text-center">
                         {Math.round(zoomScale * 100)}%
                       </span>
-                      <button 
+                      <button
                         type="button"
-                        onClick={handleZoomIn} 
+                        onClick={handleZoomIn}
                         className="p-1 hover:bg-slate-200/80 text-slate-600 rounded-lg transition cursor-pointer"
                         title="Zoom In"
                       >
@@ -1716,9 +1999,9 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
 
                       <div className="w-[1px] h-4 bg-slate-200" />
 
-                      <button 
+                      <button
                         type="button"
-                        onClick={handleZoomReset} 
+                        onClick={handleZoomReset}
                         className="p-1 hover:bg-slate-200/80 text-slate-600 rounded-lg transition cursor-pointer"
                         title="Reset View"
                       >
@@ -1729,6 +2012,42 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                   </>
                 )}
               </div>
+
+              {/* Verifier quick action bar inside receipt viewer */}
+              {user.role === "verifier" && selectedExpense && (
+                <div className="p-3 bg-white border-t border-slate-100 flex items-center justify-between z-10 relative">
+                  <div className="text-xs text-slate-700">
+                    <span className="text-slate-400">Claim Amount: </span>
+                    <strong className="font-mono text-sm text-slate-900">₹{selectedExpense.totalAmount.toFixed(2)}</strong>
+                    <span className="text-slate-400 ml-2">({selectedExpense.employeeName})</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {selectedExpense.verificationStatus !== "verified" ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => { setPreviewingBill(null); setFlagComment(""); setFlagModalOpen(true); }}
+                          className="px-3.5 py-1.5 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Clock className="h-3 w-3" /> Verification Pending
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleVerifyClaim(selectedExpense)}
+                          disabled={verifierActionLoading}
+                          className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shadow-sm disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="h-3 w-3" /> Verify Claim
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-lg border border-emerald-200 flex items-center gap-1">
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Verified
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
             </motion.div>
           </>
         )}
@@ -1738,10 +2057,10 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       <AnimatePresence>
         {deletingExpense && (
           <>
-            <div 
-              id="delete-confirm-backdrop" 
-              className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[100] flex items-center justify-center p-4" 
-              onClick={() => setDeletingExpense(null)} 
+            <div
+              id="delete-confirm-backdrop"
+              className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md z-[100] flex items-center justify-center p-4"
+              onClick={() => setDeletingExpense(null)}
             />
 
             <motion.div
@@ -1785,17 +2104,92 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
         )}
       </AnimatePresence>
 
+      {/* Verifier Flag Claim Reason Modal */}
+      <AnimatePresence>
+        {flagModalOpen && selectedExpense && (
+          <>
+            <div
+              id="flag-claim-backdrop"
+              className="fixed inset-0 min-h-screen w-screen bg-slate-950/80 backdrop-blur-xs z-[110] flex items-center justify-center p-4"
+              onClick={() => setFlagModalOpen(false)}
+            />
+
+            <motion.div
+              id="flag-claim-modal"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-md bg-white border border-slate-100 rounded-3xl shadow-2xl z-[120] overflow-hidden p-6 space-y-4"
+            >
+              <div className="flex items-start gap-3">
+                <div className="p-3 bg-amber-50 text-amber-600 rounded-2xl flex-shrink-0">
+                  <Clock className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 font-sans">Verification Pending Remarks</h3>
+                  <p className="text-xs text-slate-500">
+                    Voucher: {selectedExpense.voucherNumber || selectedExpense.title} · {selectedExpense.employeeName}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFlagModalOpen(false)}
+                  className="ml-auto text-slate-400 hover:text-slate-600 transition"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">
+                  Reason / Notes for Verification Pending (Required) *
+                </label>
+                <textarea
+                  value={flagComment}
+                  onChange={(e) => setFlagComment(e.target.value)}
+                  rows={4}
+                  placeholder="Describe why verification is pending (e.g., amount mismatch, blurry receipt, missing invoice, clarification required)..."
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 text-xs focus:bg-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 outline-none resize-none transition"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setFlagModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-600 rounded-xl transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleFlagClaim(selectedExpense, flagComment)}
+                  disabled={verifierActionLoading || !flagComment.trim()}
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-xs font-bold text-white rounded-xl transition shadow-md cursor-pointer flex items-center gap-1.5"
+                >
+                  {verifierActionLoading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Clock className="h-3.5 w-3.5" />}
+                  Mark Verification Pending
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Edit Expense Modal */}
-      <EditExpenseModal
-        expense={editingExpense}
-        currentUser={user}
-        isOpen={!!editingExpense}
-        onClose={() => setEditingExpense(null)}
-        onSuccess={() => {
-          setEditingExpense(null);
-          fetchData();
-        }}
-      />
+      {editingExpense && (
+        <EditExpenseModal
+          expense={editingExpense}
+          currentUser={user}
+          isOpen={!!editingExpense}
+          onClose={() => setEditingExpense(null)}
+          onSuccess={() => {
+            setEditingExpense(null);
+            fetchData();
+          }}
+        />
+      )}
     </div>
   );
 }

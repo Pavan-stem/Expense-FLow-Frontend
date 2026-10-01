@@ -9,7 +9,8 @@ import {
   createAdvancePayment,
   cancelAdvancePayment,
   calculateAdvanceSummary,
-  isAdvancePaymentMethod
+  isAdvancePaymentMethod,
+  isRealEmployee
 } from "../lib/firebase";
 import { 
   Wallet, 
@@ -81,7 +82,7 @@ export default function AdvanceManagement({ user, refreshTrigger, onNavigateToSu
 
     // Load registered employees for Admin dropdown & table
     if (user.role === "admin") {
-      getEmployees().then(setEmployees).catch(console.error);
+      getEmployees().then(data => setEmployees(data.filter(isRealEmployee))).catch(console.error);
     }
 
     return () => {
@@ -192,13 +193,15 @@ export default function AdvanceManagement({ user, refreshTrigger, onNavigateToSu
   );
 
   // Admin: Calculate summary for every employee (Identified strictly by Name and Email - NO Staff ID)
-  const employeeTableRows = employees.map(emp => {
-    const summary = calculateAdvanceSummary(emp.employeeId, advances, expenses, emp.email, emp.name);
-    return {
-      profile: emp,
-      ...summary
-    };
-  }).filter(row => {
+  const employeeTableRows = employees
+    .filter(isRealEmployee)
+    .map(emp => {
+      const summary = calculateAdvanceSummary(emp.employeeId, advances, expenses, emp.email, emp.name);
+      return {
+        profile: emp,
+        ...summary
+      };
+    }).filter(row => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return row.profile.name.toLowerCase().includes(q) || row.profile.email.toLowerCase().includes(q);
@@ -984,7 +987,7 @@ export default function AdvanceManagement({ user, refreshTrigger, onNavigateToSu
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-xs font-semibold transition cursor-pointer"
                   >
                     <option value="">-- Select Employee --</option>
-                    {employees.map(emp => (
+                    {employees.filter(isRealEmployee).map(emp => (
                       <option key={emp.employeeId} value={emp.email}>
                         {emp.name} ({emp.email})
                       </option>

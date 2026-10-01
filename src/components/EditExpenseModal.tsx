@@ -71,6 +71,9 @@ export default function EditExpenseModal({
 
   const isAdmin = currentUser.role === "admin";
   const isOwner = expense.employeeId === currentUser.employeeId;
+  const isLockedForEmployee = !isAdmin && (expense.verificationStatus === "verified" || expense.status === "approved" || expense.status === "reimbursed");
+  
+  if (isLockedForEmployee) return null;
   const canEdit = isAdmin || isOwner;
 
   // Form State

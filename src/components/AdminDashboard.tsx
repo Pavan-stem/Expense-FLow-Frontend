@@ -19,6 +19,7 @@ import {
   addVoucherComment,
   deleteVoucherComment,
   clearVoucherCommentsForMonth,
+  markExpenseNotificationsAsRead,
   type EmployeeProfile, 
   type Expense, 
   type ExpenseCategory,
@@ -142,6 +143,8 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
     setActiveActionStatus(newStatus);
     try {
       await updateExpense(expense.id, { status: newStatus }, user.employeeId, user.name);
+      // Mark notification for this voucher as read for admin
+      markExpenseNotificationsAsRead(user.employeeId, expense.id, expense.voucherNumber);
       await createNotification(
         expense.employeeId,
         `Expense Claim ${newStatus.toUpperCase()}`,
@@ -429,7 +432,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
       setExpenses(expData);
 
       const empData = await getEmployees();
-      setEmployees(empData.filter(e => e.role !== "admin" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
+      setEmployees(empData.filter(e => e.role !== "admin" && e.role !== "verifier" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
 
       const catData = await getCategories();
       setCategories(catData);
@@ -448,7 +451,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
     });
 
     getEmployees().then(empData => {
-      setEmployees(empData.filter(e => e.role !== "admin" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
+      setEmployees(empData.filter(e => e.role !== "admin" && e.role !== "verifier" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
     });
 
     getCategories().then(catData => {
@@ -734,7 +737,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
     // 1. Seed with registered employees from DB
     employees.forEach(emp => {
-      if (emp.role === "admin") return;
+      if (emp.role === "admin" || emp.role === "verifier") return;
       const key = (emp.email || emp.employeeId || emp.name).toLowerCase().trim();
       empMap[key] = {
         id: emp.id || emp.employeeId,
@@ -769,7 +772,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         (emp.name && exp.employeeName && emp.name.toLowerCase().trim() === exp.employeeName.toLowerCase().trim())
       );
 
-      if (matchedProfile?.role === "admin") return;
+      if (matchedProfile && (matchedProfile.role === "admin" || matchedProfile.role === "verifier")) return;
 
       const rawName = matchedProfile?.name || exp.employeeName || exp.employeeId || "Employee";
       const key = (matchedProfile?.email || exp.employeeEmail || rawName).toLowerCase().trim();
@@ -853,7 +856,7 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
       e.personalReimbursableAmount = Math.max(0, e.personalApprovedAmount - e.personalReimbursedAmount);
     });
 
-    let list = Object.values(empMap).filter(e => e.role !== "admin");
+    let list = Object.values(empMap).filter(e => e.role !== "admin" && e.role !== "verifier");
 
     // Apply search filter
     if (empSearchQuery.trim()) {
@@ -2056,16 +2059,18 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
       )}
 
       {/* Edit Expense Modal */}
-      <EditExpenseModal
-        expense={editingExpense}
-        currentUser={user}
-        isOpen={!!editingExpense}
-        onClose={() => setEditingExpense(null)}
-        onSuccess={() => {
-          setEditingExpense(null);
-          fetchData();
-        }}
-      />
+      {editingExpense && (
+        <EditExpenseModal
+          expense={editingExpense}
+          currentUser={user}
+          isOpen={!!editingExpense}
+          onClose={() => setEditingExpense(null)}
+          onSuccess={() => {
+            setEditingExpense(null);
+            fetchData();
+          }}
+        />
+      )}
     </div>
   );
 }
