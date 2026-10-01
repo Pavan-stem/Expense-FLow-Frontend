@@ -490,14 +490,34 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
   };
 
   const handleStatusChange = async (expense: Expense, newStatus: Expense["status"], customComment?: string) => {
+    // Until the voucher is verified, prevent approval by admin
+    if (newStatus === "approved" && expense.verificationStatus !== "verified") {
+      showToast("error", `Cannot approve voucher ${expense.voucherNumber || expense.title}. It must be verified by a Verifier first.`);
+      return;
+    }
+
+    // Until the voucher is approved, prevent reimbursement
+    if (newStatus === "reimbursed" && expense.status !== "approved") {
+      showToast("error", `Cannot mark voucher ${expense.voucherNumber || expense.title} as reimbursed. It must be Approved first.`);
+      return;
+    }
+
     setAdminActionLoading(true);
     setActiveActionStatus(newStatus);
     try {
       const commentToSave = customComment !== undefined ? customComment : adminComment;
-      await updateExpense(expense.id, {
+      const updatePayload: Partial<Expense> = {
         status: newStatus,
         adminComments: commentToSave || undefined
-      }, user.employeeId, user.name);
+      };
+
+      if (newStatus === "approved" || newStatus === "reimbursed") {
+        updatePayload.approvedBy = user.employeeId;
+        updatePayload.approvedByName = user.name;
+        updatePayload.approvedAt = new Date().toISOString();
+      }
+
+      await updateExpense(expense.id, updatePayload, user.employeeId, user.name);
 
       // Mark notification for this voucher as read for admin
       markExpenseNotificationsAsRead(user.employeeId, expense.id, expense.voucherNumber);
@@ -506,7 +526,7 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       await createNotification(
         expense.employeeId,
         `Expense Claim ${newStatus.toUpperCase()}`,
-        `Your claim for "${expense.title}" has been set to ${newStatus}.`,
+        `Your claim for "${expense.title}" has been set to ${newStatus}${newStatus === "approved" ? ` by ${user.name}` : ""}.`,
         expense.id,
         expense.voucherNumber
       );
@@ -514,16 +534,14 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
       // Locally update state
       setExpenses(prev => prev.map(e => e.id === expense.id ? {
         ...e,
-        status: newStatus,
-        adminComments: commentToSave || undefined
+        ...updatePayload
       } : e));
 
       // Update selected expense modal
       if (selectedExpense?.id === expense.id) {
         setSelectedExpense(prev => prev ? {
           ...prev,
-          status: newStatus,
-          adminComments: commentToSave || undefined
+          ...updatePayload
         } : null);
       }
 
@@ -542,13 +560,27 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
     if (selectedIds.length === 0) return;
     setAdminActionLoading(true);
     try {
+      let approvedCount = 0;
+      let skippedUnverifiedCount = 0;
+
       for (const id of selectedIds) {
         const exp = expenses.find(e => e.id === id);
         if (exp && (exp.status === "pending" || exp.status === "under_review")) {
-          await updateExpense(id, {
-            status: "approved",
-            adminComments: "Bulk approved."
-          }, user.employeeId, user.name);
+          // Strict verification requirement
+          if (exp.verificationStatus !== "verified") {
+            skippedUnverifiedCount++;
+            continue;
+          }
+
+          const updatePayload = {
+            status: "approved" as const,
+            adminComments: "Bulk approved.",
+            approvedBy: user.employeeId,
+            approvedByName: user.name,
+            approvedAt: new Date().toISOString()
+          };
+
+          await updateExpense(id, updatePayload, user.employeeId, user.name);
 
           // Mark notification for this voucher as read for admin
           markExpenseNotificationsAsRead(user.employeeId, exp.id, exp.voucherNumber);
@@ -556,18 +588,35 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
           await createNotification(
             exp.employeeId,
             "Expense Claim APPROVED",
-            `Your claim for "${exp.title}" was approved during a bulk administrative operation.`
+            `Your claim for "${exp.title}" was approved by ${user.name} during bulk administrative approval.`
           );
+          approvedCount++;
         }
       }
 
-      setExpenses(prev => prev.map(e => selectedIds.includes(e.id) ? {
-        ...e,
-        status: "approved" as const,
-        adminComments: "Bulk approved."
-      } : e));
+      setExpenses(prev => prev.map(e => {
+        if (selectedIds.includes(e.id) && e.verificationStatus === "verified" && (e.status === "pending" || e.status === "under_review")) {
+          return {
+            ...e,
+            status: "approved" as const,
+            adminComments: "Bulk approved.",
+            approvedBy: user.employeeId,
+            approvedByName: user.name,
+            approvedAt: new Date().toISOString()
+          };
+        }
+        return e;
+      }));
 
       setSelectedIds([]);
+
+      if (approvedCount > 0 && skippedUnverifiedCount > 0) {
+        showToast("info", `✓ Approved ${approvedCount} verified vouchers. Skipped ${skippedUnverifiedCount} unverified vouchers.`);
+      } else if (approvedCount > 0) {
+        showToast("success", `✓ Successfully bulk approved ${approvedCount} verified vouchers.`);
+      } else if (skippedUnverifiedCount > 0) {
+        showToast("error", `Cannot approve: None of the selected vouchers have been verified by a Verifier yet.`);
+      }
     } catch (err) {
       console.error("Bulk approval error:", err);
     } finally {
@@ -696,18 +745,32 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
   };
 
   // Status Badge Helper
-  const getStatusBadge = (status: Expense["status"]) => {
+  const getStatusBadge = (status: Expense["status"], approvedByName?: string) => {
     switch (status) {
       case "pending":
-        return <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 text-xs font-semibold rounded-full border border-amber-100">🟡 Pending</span>;
+        return <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-bold rounded-full border border-amber-200">🟡 Pending</span>;
       case "under_review":
-        return <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-sky-50 text-sky-700 text-xs font-semibold rounded-full border border-sky-100">🔵 Under Review</span>;
+        return <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-sky-50 text-sky-700 text-[10px] font-bold rounded-full border border-sky-200">🔵 Under Review</span>;
       case "approved":
-        return <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full border border-emerald-100 font-sans">🟢 Approved</span>;
+        return (
+          <span 
+            className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded-full border border-emerald-200 font-sans"
+            title={approvedByName ? `Approved by ${approvedByName}` : "Approved"}
+          >
+            🟢 {approvedByName ? `Approved by ${approvedByName}` : "Approved"}
+          </span>
+        );
       case "rejected":
-        return <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-50 text-rose-700 text-xs font-semibold rounded-full border border-rose-100 font-sans">🔴 Rejected</span>;
+        return <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-rose-50 text-rose-700 text-[10px] font-bold rounded-full border border-rose-200 font-sans">🔴 Rejected</span>;
       case "reimbursed":
-        return <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 text-purple-700 text-xs font-semibold rounded-full border border-purple-100 font-sans">🟣 Reimbursed</span>;
+        return (
+          <span 
+            className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-purple-50 text-purple-700 text-[10px] font-bold rounded-full border border-purple-200 font-sans"
+            title={approvedByName ? `Approved by ${approvedByName} (Reimbursed)` : "Reimbursed"}
+          >
+            🟣 {approvedByName ? `Approved by ${approvedByName}` : "Reimbursed"}
+          </span>
+        );
     }
   };
 
@@ -1213,10 +1276,22 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                     </td>
                     <td className="py-3.5 px-4 text-center whitespace-nowrap">
                       <div className="flex flex-col items-center gap-1">
-                        {getStatusBadge(exp.status)}
+                        {getStatusBadge(exp.status, exp.approvedByName)}
                         {exp.verificationStatus === "verified" ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            <CheckCircle2 className="h-2.5 w-2.5" /> Verified
+                          <span 
+                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            title={exp.verifiedByName ? `Verified by ${exp.verifiedByName}` : "Verified"}
+                          >
+                            <CheckCircle2 className="h-2.5 w-2.5" />
+                            {exp.verifiedByName ? `Verified by ${exp.verifiedByName}` : "Verified"}
+                          </span>
+                        ) : exp.verificationStatus === "flagged" ? (
+                          <span 
+                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200"
+                            title={exp.verifiedByName ? `Pending with remarks by ${exp.verifiedByName}` : "Verification Pending"}
+                          >
+                            <Clock className="h-2.5 w-2.5" />
+                            {exp.verifiedByName ? `Pending (${exp.verifiedByName})` : "Verification Pending"}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
@@ -1407,7 +1482,83 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                   </div>
                   <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
                     <span className="block text-[9px] uppercase tracking-wider font-bold text-slate-400">Status</span>
-                    <div className="mt-1">{getStatusBadge(selectedExpense.status)}</div>
+                    <div className="mt-1">{getStatusBadge(selectedExpense.status, selectedExpense.approvedByName)}</div>
+                  </div>
+                </div>
+
+                {/* Verification & Approval Traceability */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Verification Info */}
+                  <div className={`p-3.5 rounded-xl border flex items-start gap-2.5 ${
+                    selectedExpense.verificationStatus === "verified"
+                      ? "bg-emerald-50/70 border-emerald-200 text-emerald-950"
+                      : selectedExpense.verificationStatus === "flagged"
+                      ? "bg-rose-50/70 border-rose-200 text-rose-950"
+                      : "bg-amber-50/70 border-amber-200 text-amber-950"
+                  }`}>
+                    <div className="mt-0.5">
+                      {selectedExpense.verificationStatus === "verified" ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      ) : (
+                        <Clock className="h-4 w-4 text-amber-600" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="block text-[10px] uppercase font-extrabold tracking-wider opacity-70">Verification Status</span>
+                      <span className="block text-xs font-black mt-0.5">
+                        {selectedExpense.verificationStatus === "verified"
+                          ? `Verified by ${selectedExpense.verifiedByName || "Verifier"}`
+                          : selectedExpense.verificationStatus === "flagged"
+                          ? `Verification Pending (${selectedExpense.verifiedByName || "Verifier"})`
+                          : "Awaiting Verification"}
+                      </span>
+                      {selectedExpense.verifiedAt && (
+                        <span className="block text-[10px] opacity-75 font-mono mt-0.5">
+                          {new Date(selectedExpense.verifiedAt).toLocaleString()}
+                        </span>
+                      )}
+                      {selectedExpense.verifierComments && (
+                        <p className="text-[11px] text-rose-700 bg-rose-100/50 p-1.5 rounded-lg mt-1.5 border border-rose-200/60 font-medium">
+                          <strong>Verifier Remarks:</strong> {selectedExpense.verifierComments}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Approval Info */}
+                  <div className={`p-3.5 rounded-xl border flex items-start gap-2.5 ${
+                    selectedExpense.status === "approved" || selectedExpense.status === "reimbursed"
+                      ? "bg-emerald-50/70 border-emerald-200 text-emerald-950"
+                      : selectedExpense.status === "rejected"
+                      ? "bg-rose-50/70 border-rose-200 text-rose-950"
+                      : "bg-slate-50 border-slate-200 text-slate-700"
+                  }`}>
+                    <div className="mt-0.5">
+                      {selectedExpense.status === "approved" || selectedExpense.status === "reimbursed" ? (
+                        <CheckCircle className="h-4 w-4 text-emerald-600" />
+                      ) : selectedExpense.status === "rejected" ? (
+                        <AlertCircle className="h-4 w-4 text-rose-600" />
+                      ) : (
+                        <Clock className="h-4 w-4 text-slate-400" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="block text-[10px] uppercase font-extrabold tracking-wider opacity-70">Approval Status</span>
+                      <span className="block text-xs font-black mt-0.5">
+                        {selectedExpense.status === "approved" || selectedExpense.status === "reimbursed"
+                          ? `Approved by ${selectedExpense.approvedByName || "Admin"}`
+                          : selectedExpense.status === "rejected"
+                          ? "Claim Rejected"
+                          : selectedExpense.status === "under_review"
+                          ? "Under Administrative Review"
+                          : "Pending Approval"}
+                      </span>
+                      {selectedExpense.approvedAt && (
+                        <span className="block text-[10px] opacity-75 font-mono mt-0.5">
+                          {new Date(selectedExpense.approvedAt).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -1701,11 +1852,20 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                     <button
                       id="admin-approve-claim"
                       onClick={() => handleStatusChange(selectedExpense, "approved")}
-                      disabled={adminActionLoading}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-xs font-semibold text-white rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                      disabled={adminActionLoading || selectedExpense.verificationStatus !== "verified"}
+                      className={`px-4 py-2 text-xs font-semibold rounded-xl transition flex items-center gap-1.5 shadow-sm ${
+                        selectedExpense.verificationStatus === "verified"
+                          ? "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                          : "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed opacity-60"
+                      }`}
+                      title={
+                        selectedExpense.verificationStatus === "verified"
+                          ? "Approve this verified voucher claim"
+                          : "Cannot approve: Voucher must be verified by a Verifier first"
+                      }
                     >
                       {activeActionStatus === "approved" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-                      Approve Claim
+                      {selectedExpense.verificationStatus === "verified" ? "Approve Claim" : "Approve (Requires Verification)"}
                     </button>
                     {isAdvancePaymentMethod(selectedExpense.paymentMethod, selectedExpense.paymentSource) ? (
                       <span className="px-3 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1">
@@ -1728,12 +1888,26 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                       <button
                         id="admin-reimburse-claim"
                         onClick={() => handleStatusChange(selectedExpense, "reimbursed")}
-                        disabled={adminActionLoading}
-                        className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-xs font-semibold text-white rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-sm"
-                        title={isSwPaymentMethod(selectedExpense.paymentMethod) ? "Mark SW Payment as paid by company" : "Mark claim as reimbursed to employee"}
+                        disabled={adminActionLoading || selectedExpense.status !== "approved"}
+                        className={`px-4 py-2 text-xs font-semibold rounded-xl transition flex items-center gap-1.5 shadow-sm ${
+                          selectedExpense.status === "approved"
+                            ? "bg-purple-600 hover:bg-purple-700 text-white cursor-pointer"
+                            : "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed opacity-60"
+                        }`}
+                        title={
+                          selectedExpense.status === "approved"
+                            ? isSwPaymentMethod(selectedExpense.paymentMethod)
+                              ? "Mark SW Payment as paid by company"
+                              : "Mark claim as reimbursed to employee"
+                            : "Cannot reimburse: Voucher must be Approved first"
+                        }
                       >
                         {activeActionStatus === "reimbursed" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-                        {isSwPaymentMethod(selectedExpense.paymentMethod) ? "Mark Paid" : "Mark Reimbursed"}
+                        {isSwPaymentMethod(selectedExpense.paymentMethod)
+                          ? "Mark Paid"
+                          : selectedExpense.status === "approved"
+                          ? "Mark Reimbursed"
+                          : "Reimburse (Requires Approval)"}
                       </button>
                     )}
                   </div>

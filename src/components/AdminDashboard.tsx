@@ -139,22 +139,44 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
   };
 
   const handleAdminStatusChange = async (expense: Expense, newStatus: Expense["status"]) => {
+    // Until the voucher is verified, prevent approval by admin
+    if (newStatus === "approved" && expense.verificationStatus !== "verified") {
+      showToast("error", `Cannot approve voucher ${expense.voucherNumber || expense.title}. It must be verified by a Verifier first.`);
+      return;
+    }
+
+    // Until the voucher is approved, prevent reimbursement
+    if (newStatus === "reimbursed" && expense.status !== "approved") {
+      showToast("error", `Cannot mark voucher ${expense.voucherNumber || expense.title} as reimbursed. It must be Approved first.`);
+      return;
+    }
+
     setAdminActionLoading(true);
     setActiveActionStatus(newStatus);
     try {
-      await updateExpense(expense.id, { status: newStatus }, user.employeeId, user.name);
+      const updatePayload: Partial<Expense> = {
+        status: newStatus
+      };
+
+      if (newStatus === "approved" || newStatus === "reimbursed") {
+        updatePayload.approvedBy = user.employeeId;
+        updatePayload.approvedByName = user.name;
+        updatePayload.approvedAt = new Date().toISOString();
+      }
+
+      await updateExpense(expense.id, updatePayload, user.employeeId, user.name);
       // Mark notification for this voucher as read for admin
       markExpenseNotificationsAsRead(user.employeeId, expense.id, expense.voucherNumber);
       await createNotification(
         expense.employeeId,
         `Expense Claim ${newStatus.toUpperCase()}`,
-        `Your claim for "${expense.title}" has been set to ${newStatus}.`,
+        `Your claim for "${expense.title}" has been set to ${newStatus}${newStatus === "approved" ? ` by ${user.name}` : ""}.`,
         expense.id,
         expense.voucherNumber
       );
-      setExpenses(prev => prev.map(e => e.id === expense.id ? { ...e, status: newStatus } : e));
+      setExpenses(prev => prev.map(e => e.id === expense.id ? { ...e, ...updatePayload } : e));
       if (viewingVoucherDetails?.id === expense.id) {
-        setViewingVoucherDetails(prev => prev ? { ...prev, status: newStatus } : null);
+        setViewingVoucherDetails(prev => prev ? { ...prev, ...updatePayload } : null);
       }
       showToast("success", `✓ Claim ${expense.voucherNumber || expense.title} status updated to '${newStatus.replace('_', ' ').toUpperCase()}' successfully.`);
     } catch (err) {
@@ -1596,6 +1618,59 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                 </div>
               </div>
 
+              {/* Traceability: Verification and Approval Details */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className={`p-3 rounded-xl border flex items-start gap-2 ${
+                  viewingVoucherDetails.verificationStatus === "verified"
+                    ? "bg-emerald-50/70 border-emerald-200 text-emerald-950"
+                    : viewingVoucherDetails.verificationStatus === "flagged"
+                    ? "bg-rose-50/70 border-rose-200 text-rose-950"
+                    : "bg-amber-50/70 border-amber-200 text-amber-950"
+                }`}>
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70">Verification Info</span>
+                    <span className="block font-black mt-0.5">
+                      {viewingVoucherDetails.verificationStatus === "verified"
+                        ? `Verified by ${viewingVoucherDetails.verifiedByName || "Verifier"}`
+                        : viewingVoucherDetails.verificationStatus === "flagged"
+                        ? `Pending (${viewingVoucherDetails.verifiedByName || "Verifier"})`
+                        : "Awaiting Verification"}
+                    </span>
+                    {viewingVoucherDetails.verifiedAt && (
+                      <span className="block text-[9px] opacity-75 font-mono">
+                        {new Date(viewingVoucherDetails.verifiedAt).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className={`p-3 rounded-xl border flex items-start gap-2 ${
+                  viewingVoucherDetails.status === "approved" || viewingVoucherDetails.status === "reimbursed"
+                    ? "bg-emerald-50/70 border-emerald-200 text-emerald-950"
+                    : viewingVoucherDetails.status === "rejected"
+                    ? "bg-rose-50/70 border-rose-200 text-rose-950"
+                    : "bg-slate-50 border-slate-200 text-slate-700"
+                }`}>
+                  <Shield className="h-4 w-4 text-indigo-600 mt-0.5 shrink-0" />
+                  <div>
+                    <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70">Approval Info</span>
+                    <span className="block font-black mt-0.5">
+                      {viewingVoucherDetails.status === "approved" || viewingVoucherDetails.status === "reimbursed"
+                        ? `Approved by ${viewingVoucherDetails.approvedByName || "Admin"}`
+                        : viewingVoucherDetails.status === "rejected"
+                        ? "Claim Rejected"
+                        : "Pending Approval"}
+                    </span>
+                    {viewingVoucherDetails.approvedAt && (
+                      <span className="block text-[9px] opacity-75 font-mono">
+                        {new Date(viewingVoucherDetails.approvedAt).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {viewingVoucherDetails.adminComments && (
                 <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl text-xs space-y-1">
                   <span className="block font-bold text-indigo-900">Decision comments:</span>
@@ -1820,11 +1895,20 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                   id="admin-modal-approve-btn"
                   type="button"
                   onClick={() => handleAdminStatusChange(viewingVoucherDetails, "approved")}
-                  disabled={adminActionLoading}
-                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs"
+                  disabled={adminActionLoading || viewingVoucherDetails.verificationStatus !== "verified"}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs ${
+                    viewingVoucherDetails.verificationStatus === "verified"
+                      ? "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                      : "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed opacity-60"
+                  }`}
+                  title={
+                    viewingVoucherDetails.verificationStatus === "verified"
+                      ? "Approve this verified voucher claim"
+                      : "Cannot approve: Voucher must be verified by a Verifier first"
+                  }
                 >
                   {activeActionStatus === "approved" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-                  Approve
+                  {viewingVoucherDetails.verificationStatus === "verified" ? "Approve" : "Approve (Requires Verification)"}
                 </button>
                 {isAdvancePaymentMethod(viewingVoucherDetails.paymentMethod, viewingVoucherDetails.paymentSource) ? (
                   <span className="px-3 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1">
@@ -1849,12 +1933,26 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
                     id="admin-modal-reimburse-btn"
                     type="button"
                     onClick={() => handleAdminStatusChange(viewingVoucherDetails, "reimbursed")}
-                    disabled={adminActionLoading}
-                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs"
-                    title={isSwPaymentMethod(viewingVoucherDetails.paymentMethod) ? "Mark SW Payment as paid by company" : "Mark as reimbursed to employee"}
+                    disabled={adminActionLoading || viewingVoucherDetails.status !== "approved"}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-xs ${
+                      viewingVoucherDetails.status === "approved"
+                        ? "bg-purple-600 hover:bg-purple-700 text-white cursor-pointer"
+                        : "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed opacity-60"
+                    }`}
+                    title={
+                      viewingVoucherDetails.status === "approved"
+                        ? isSwPaymentMethod(viewingVoucherDetails.paymentMethod)
+                          ? "Mark SW Payment as paid by company"
+                          : "Mark as reimbursed to employee"
+                        : "Cannot reimburse: Voucher must be Approved first"
+                    }
                   >
                     {activeActionStatus === "reimbursed" && <RefreshCw className="h-3.5 w-3.5 animate-spin" />}
-                    {isSwPaymentMethod(viewingVoucherDetails.paymentMethod) ? "Mark Paid" : "Reimburse"}
+                    {isSwPaymentMethod(viewingVoucherDetails.paymentMethod)
+                      ? "Mark Paid"
+                      : viewingVoucherDetails.status === "approved"
+                      ? "Reimburse"
+                      : "Reimburse (Requires Approval)"}
                   </button>
                 )}
                 <button

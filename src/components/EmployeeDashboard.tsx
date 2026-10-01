@@ -487,12 +487,27 @@ export default function EmployeeDashboard({ user, onNavigateToSubmit, onNavigate
                       </td>
                       <td className="py-3 px-3 text-right font-bold text-slate-800 font-mono whitespace-nowrap">₹{exp.totalAmount.toFixed(2)}</td>
                       <td className="py-3 pl-3 text-center whitespace-nowrap">
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                          exp.status === "approved" || exp.status === "reimbursed" ? "bg-emerald-50 text-emerald-700" :
-                          exp.status === "rejected" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"
-                        }`}>
-                          {exp.status.toUpperCase()}
-                        </span>
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span 
+                            className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                              exp.status === "approved" || exp.status === "reimbursed" ? "bg-emerald-50 text-emerald-700" :
+                              exp.status === "rejected" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"
+                            }`}
+                            title={exp.approvedByName ? `Approved by ${exp.approvedByName}` : exp.status.toUpperCase()}
+                          >
+                            {(exp.status === "approved" || exp.status === "reimbursed") && exp.approvedByName
+                              ? `Approved (${exp.approvedByName})`
+                              : exp.status.toUpperCase()}
+                          </span>
+                          {exp.verificationStatus === "verified" && (
+                            <span 
+                              className="text-[8px] text-emerald-600 font-semibold"
+                              title={exp.verifiedByName ? `Verified by ${exp.verifiedByName}` : "Verified"}
+                            >
+                              ✓ {exp.verifiedByName ? `Verif: ${exp.verifiedByName}` : "Verified"}
+                            </span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

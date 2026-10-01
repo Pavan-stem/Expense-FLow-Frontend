@@ -110,6 +110,9 @@ export interface Expense {
   verifiedByName?: string;
   verifiedAt?: string;
   verifierComments?: string;
+  approvedBy?: string;
+  approvedByName?: string;
+  approvedAt?: string;
   adminComments?: string;
   comments?: VoucherComment[];
   createdDate: string;
