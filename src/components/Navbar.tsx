@@ -162,9 +162,9 @@ export default function Navbar({
                           className={`p-3.5 hover:bg-slate-50 transition cursor-pointer flex gap-3 ${!notif.read ? "bg-indigo-50/20" : ""}`}
                         >
                           <div className="mt-0.5">
-                            {notif.title.toLowerCase().includes("approve") ? (
+                            {notif.title.toLowerCase().includes("approve") || (notif.title.toLowerCase().includes("verif") && !notif.title.toLowerCase().includes("flag")) ? (
                               <CheckCircle className="h-4 w-4 text-emerald-500" />
-                            ) : notif.title.toLowerCase().includes("reject") ? (
+                            ) : notif.title.toLowerCase().includes("reject") || notif.title.toLowerCase().includes("flag") ? (
                               <XCircle className="h-4 w-4 text-rose-500" />
                             ) : notif.title.toLowerCase().includes("submit") ? (
                               <FileText className="h-4 w-4 text-indigo-500" />

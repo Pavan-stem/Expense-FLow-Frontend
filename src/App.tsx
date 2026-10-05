@@ -28,7 +28,7 @@ export default function App() {
 
     if (currentUser.role === "employee" && activeTab === "expenses") {
       markAllUserNotificationsAsRead(currentUser.employeeId);
-    } else if (currentUser.role === "verifier" && (activeTab === "expenses" || activeTab === "dashboard")) {
+    } else if (currentUser.role === "verifier" && activeTab === "expenses") {
       markAllUserNotificationsAsRead(currentUser.employeeId);
     } else if (currentUser.role === "admin" && (activeTab === "expenses" || activeTab === "dashboard")) {
       markAllUserNotificationsAsRead(currentUser.employeeId);

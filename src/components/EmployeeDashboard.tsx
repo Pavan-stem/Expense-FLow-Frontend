@@ -502,9 +502,9 @@ export default function EmployeeDashboard({ user, onNavigateToSubmit, onNavigate
                           {exp.verificationStatus === "verified" && (
                             <span 
                               className="text-[8px] text-emerald-600 font-semibold"
-                              title={exp.verifiedByName ? `Verified by ${exp.verifiedByName}` : "Verified"}
+                              title="Bill is verified"
                             >
-                              ✓ {exp.verifiedByName ? `Verif: ${exp.verifiedByName}` : "Verified"}
+                              ✓ Bill is verified
                             </span>
                           )}
                         </div>

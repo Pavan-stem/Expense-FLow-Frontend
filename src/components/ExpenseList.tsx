@@ -1280,18 +1280,18 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                         {exp.verificationStatus === "verified" ? (
                           <span 
                             className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"
-                            title={exp.verifiedByName ? `Verified by ${exp.verifiedByName}` : "Verified"}
+                            title={user.role === "employee" ? "Bill is verified" : exp.verifiedByName ? `Verified by ${exp.verifiedByName}` : "Verified"}
                           >
                             <CheckCircle2 className="h-2.5 w-2.5" />
-                            {exp.verifiedByName ? `Verified by ${exp.verifiedByName}` : "Verified"}
+                            {user.role === "employee" ? "Verified" : exp.verifiedByName ? `Verified by ${exp.verifiedByName}` : "Verified"}
                           </span>
                         ) : exp.verificationStatus === "flagged" ? (
                           <span 
                             className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200"
-                            title={exp.verifiedByName ? `Pending with remarks by ${exp.verifiedByName}` : "Verification Pending"}
+                            title={user.role === "employee" ? "Verification Pending" : exp.verifiedByName ? `Pending with remarks by ${exp.verifiedByName}` : "Verification Pending"}
                           >
                             <Clock className="h-2.5 w-2.5" />
-                            {exp.verifiedByName ? `Pending (${exp.verifiedByName})` : "Verification Pending"}
+                            {user.role === "employee" ? "Verification Pending" : exp.verifiedByName ? `Pending (${exp.verifiedByName})` : "Verification Pending"}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
@@ -1507,9 +1507,9 @@ export default function ExpenseList({ user, refreshTrigger, targetExpenseId, onC
                       <span className="block text-[10px] uppercase font-extrabold tracking-wider opacity-70">Verification Status</span>
                       <span className="block text-xs font-black mt-0.5">
                         {selectedExpense.verificationStatus === "verified"
-                          ? `Verified by ${selectedExpense.verifiedByName || "Verifier"}`
+                          ? (user.role === "employee" ? "Bill is verified" : `Verified by ${selectedExpense.verifiedByName || "Verifier"}`)
                           : selectedExpense.verificationStatus === "flagged"
-                          ? `Verification Pending (${selectedExpense.verifiedByName || "Verifier"})`
+                          ? (user.role === "employee" ? "Verification Pending" : `Verification Pending (${selectedExpense.verifiedByName || "Verifier"})`)
                           : "Awaiting Verification"}
                       </span>
                       {selectedExpense.verifiedAt && (

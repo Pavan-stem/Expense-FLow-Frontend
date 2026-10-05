@@ -1857,27 +1857,86 @@ export async function verifyExpense(
     };
     await updateDoc(ref, payload);
 
-    const adminsQuery = query(collection(db, "users"), where("role", "==", "admin"));
-    const adminsSnap = await getDocs(adminsQuery);
     const vNum = exp.voucherNumber || expenseId;
-    for (const adminDoc of adminsSnap.docs) {
+
+    // 1. Notify Admins
+    try {
+      const adminsQuery = query(collection(db, "users"), where("role", "==", "admin"));
+      const adminsSnap = await getDocs(adminsQuery);
+      for (const adminDoc of adminsSnap.docs) {
+        await createNotification(
+          adminDoc.id,
+          verificationStatus === "verified" ? `Voucher ${vNum} Verified` : `Voucher ${vNum} Flagged`,
+          verificationStatus === "verified"
+            ? `${verifierName} verified expense from ${exp.employeeName}. Ready for approval.`
+            : `${verifierName} flagged expense from ${exp.employeeName}: "${(verifierComments || "").substring(0, 80)}"`,
+          expenseId, vNum
+        );
+      }
+    } catch (adminErr) {
+      console.warn("Could not notify admins:", adminErr);
+    }
+
+    // 2. Notify other verifiers showing who verified the bill
+    try {
+      const verifiersQuery = query(collection(db, "users"), where("role", "==", "verifier"));
+      const verifiersSnap = await getDocs(verifiersQuery);
+      const notifiedVerifierIds = new Set<string>();
+
+      for (const vDoc of verifiersSnap.docs) {
+        const vData = vDoc.data() as EmployeeProfile;
+        const otherVerifierId = vData.employeeId || vDoc.id;
+        if (otherVerifierId && otherVerifierId !== verifierId && vDoc.id !== verifierId && !notifiedVerifierIds.has(otherVerifierId)) {
+          notifiedVerifierIds.add(otherVerifierId);
+          await createNotification(
+            otherVerifierId,
+            verificationStatus === "verified" ? `Voucher ${vNum} Verified` : `Voucher ${vNum} Flagged`,
+            verificationStatus === "verified"
+              ? `${verifierName} verified the bill for ${exp.employeeName} (${vNum}).`
+              : `${verifierName} flagged Voucher ${vNum} (${exp.employeeName}): "${(verifierComments || "").substring(0, 80)}"`,
+            expenseId,
+            vNum
+          );
+        }
+      }
+
+      // Check local cached users as fallback if Firestore had no verifier docs or offline
+      const cachedUsers = getLocalUsersCache();
+      for (const cached of cachedUsers) {
+        if (cached.profile?.role === "verifier") {
+          const cId = cached.profile.employeeId;
+          if (cId && cId !== verifierId && !notifiedVerifierIds.has(cId)) {
+            notifiedVerifierIds.add(cId);
+            await createNotification(
+              cId,
+              verificationStatus === "verified" ? `Voucher ${vNum} Verified` : `Voucher ${vNum} Flagged`,
+              verificationStatus === "verified"
+                ? `${verifierName} verified the bill for ${exp.employeeName} (${vNum}).`
+                : `${verifierName} flagged Voucher ${vNum} (${exp.employeeName}): "${(verifierComments || "").substring(0, 80)}"`,
+              expenseId,
+              vNum
+            );
+          }
+        }
+      }
+    } catch (verifErr) {
+      console.warn("Could not notify other verifiers:", verifErr);
+    }
+
+    // 3. Notify Employee (hide verifier name - only show bill is verified)
+    try {
       await createNotification(
-        adminDoc.id,
-        verificationStatus === "verified" ? `Voucher ${vNum} Verified` : `Voucher ${vNum} Flagged`,
+        exp.employeeId,
+        verificationStatus === "verified" ? `Bill (${vNum}) Verified` : `Expense (${vNum}) Flagged`,
         verificationStatus === "verified"
-          ? `${verifierName} verified expense from ${exp.employeeName}. Ready for approval.`
-          : `${verifierName} flagged expense from ${exp.employeeName}: "${(verifierComments || "").substring(0, 80)}"`,
+          ? "Bill is verified."
+          : `Verification pending: "${(verifierComments || "").substring(0, 80)}"`,
         expenseId, vNum
       );
+    } catch (empErr) {
+      console.warn("Could not notify employee:", empErr);
     }
-    await createNotification(
-      exp.employeeId,
-      verificationStatus === "verified" ? `Expense (${vNum}) Verified` : `Expense (${vNum}) Flagged`,
-      verificationStatus === "verified"
-        ? `${verifierName} verified your expense and forwarded it for admin approval.`
-        : `${verifierName} flagged your expense: "${(verifierComments || "").substring(0, 80)}"`,
-      expenseId, vNum
-    );
+
     await logActivity(verifierId, verifierName,
       verificationStatus === "verified" ? "Expense Verified" : "Expense Flagged",
       `Verifier ${verificationStatus} expense ${vNum} (${exp.employeeName})`
