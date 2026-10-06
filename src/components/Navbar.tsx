@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { type EmployeeProfile, type AppNotification, subscribeToUserNotifications, markNotificationAsRead, markExpenseNotificationsAsRead } from "../lib/firebase";
-import { Bell, LogOut, Clock, CheckCircle, XCircle, AlertCircle, FileText, User, Menu } from "lucide-react";
+import { type EmployeeProfile, type AppNotification, subscribeToUserNotifications, markNotificationAsRead, markExpenseNotificationsAsRead, isSuperAdmin } from "../lib/firebase";
+import { Bell, LogOut, Clock, CheckCircle, XCircle, AlertCircle, FileText, User, Menu, Crown } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 interface NavbarProps {
@@ -23,6 +23,8 @@ export default function Navbar({
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [time, setTime] = useState(new Date());
+
+  const userIsSuper = isSuperAdmin(user);
 
   // Live clock
   useEffect(() => {
@@ -101,9 +103,15 @@ export default function Navbar({
           ExpenseFlow
         </h1>
         <div className="hidden xs:block h-3.5 w-[1px] bg-slate-200" />
-        <span className="hidden xs:inline-block text-[9px] sm:text-xs font-semibold px-1.5 sm:px-2.5 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-mono uppercase tracking-wider flex-shrink-0">
-          {user.role}
-        </span>
+        {userIsSuper ? (
+          <span className="hidden xs:inline-flex items-center gap-1 text-[9px] sm:text-xs font-bold px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-300 rounded-full font-mono uppercase tracking-wider flex-shrink-0">
+            <Crown className="h-3 w-3 text-amber-600" /> Super Admin
+          </span>
+        ) : (
+          <span className="hidden xs:inline-block text-[9px] sm:text-xs font-semibold px-1.5 sm:px-2.5 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-mono uppercase tracking-wider flex-shrink-0">
+            {user.role}
+          </span>
+        )}
       </div>
 
       {/* Utilities */}

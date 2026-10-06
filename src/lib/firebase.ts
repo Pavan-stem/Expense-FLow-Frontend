@@ -51,6 +51,18 @@ export interface EmployeeProfile {
   joiningDate: string;
   role: "employee" | "admin" | "verifier";
   status?: "active" | "deactivated";
+  isSuperAdmin?: boolean;
+}
+
+export function isSuperAdmin(user?: Partial<EmployeeProfile> | null): boolean {
+  if (!user) return false;
+  if (user.isSuperAdmin === true) return true;
+  const email = (user.email || "").toLowerCase().trim();
+  const name = (user.name || "").toLowerCase().trim();
+  const id = (user.employeeId || user.id || "").toUpperCase().trim();
+  const isMatch = email === "stem@admin.com" || name === "stemworld" || name.includes("stemworld") || id === "ADM786";
+  if (!isMatch) return false;
+  return !user.role || user.role === "admin";
 }
 
 export interface BillFile {
@@ -250,29 +262,47 @@ export async function loginWithEmailAndPassword(email: string, password: string)
     const credSnap = await getDoc(credRef);
     if (!credSnap.exists()) {
       const cached = getLocalUsersCache().find(u => u.email === cleanEmail && u.password === password);
+      if (cached?.profile?.status === "deactivated") {
+        throw new Error("This account has been deactivated. Please contact an administrator.");
+      }
       return cached ? cached.profile : null;
     }
 
     const credData = credSnap.data();
     if (credData.password !== password) return null;
 
-    const userRef = doc(db, "users", credData.employeeId);
-    const userSnap = await getDoc(userRef);
-    if (!userSnap.exists()) return null;
+    let userRef = doc(db, "users", credData.employeeId);
+    let userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) {
+      const q = query(collection(db, "users"), where("employeeId", "==", credData.employeeId));
+      const qSnap = await getDocs(q);
+      if (qSnap.empty) return null;
+      userSnap = qSnap.docs[0] as any;
+    }
 
     const profile = userSnap.data() as EmployeeProfile;
+    if (profile.status === "deactivated") {
+      throw new Error("This account has been deactivated. Please contact an administrator.");
+    }
     cacheUserLocally(cleanEmail, password, profile);
     return profile;
   } catch (error: any) {
+    if (error?.message?.includes("deactivated")) {
+      throw error;
+    }
     console.warn("Firestore offline or unavailable during login:", error);
     // Offline resilience: check local storage cache
     const cached = getLocalUsersCache().find(u => u.email === cleanEmail && u.password === password);
     if (cached) {
+      if (cached.profile?.status === "deactivated") {
+        throw new Error("This account has been deactivated. Please contact an administrator.");
+      }
       return cached.profile;
     }
     return null;
   }
 }
+
 
 export async function registerUser(
   profile: Omit<EmployeeProfile, "role">,
@@ -1367,10 +1397,113 @@ export async function getAuditLogs(): Promise<AuditLog[]> {
   }
 }
 
+export async function getAllUsers(): Promise<EmployeeProfile[]> {
+  try {
+    const snap = await getDocs(collection(db, "users"));
+    const list = snap.docs.map(d => {
+      const data = d.data() as EmployeeProfile;
+      const superFlag = isSuperAdmin({ ...data, id: d.id });
+      return {
+        ...data,
+        id: data.id || data.employeeId || d.id,
+        employeeId: data.employeeId || data.id || d.id,
+        isSuperAdmin: superFlag || data.isSuperAdmin
+      };
+    });
+
+    const seen = new Set<string>();
+    const uniqueList: EmployeeProfile[] = [];
+
+    const addIfUnique = (emp: EmployeeProfile) => {
+      if (!emp) return;
+      const idKey = (emp.employeeId || emp.id || "").trim().toLowerCase();
+      const emailKey = (emp.email || "").trim().toLowerCase();
+      if (idKey && !seen.has(idKey) && !seen.has(emailKey)) {
+        seen.add(idKey);
+        if (emailKey) seen.add(emailKey);
+        uniqueList.push(emp);
+      }
+    };
+
+    list.forEach(addIfUnique);
+
+    // Merge with any cached users from localStorage only if offline / server list empty
+    try {
+      if (list.length === 0) {
+        const cached = getLocalUsersCache();
+        for (const cu of cached) {
+          if (cu?.profile) {
+            addIfUnique(cu.profile);
+          }
+        }
+      }
+    } catch {}
+
+    // Sort: Super Admin first (0), then other Admins (1), then Verifiers (2), then Employees (3); then alphabetically by name
+    const getPriority = (u: EmployeeProfile) => {
+      if (isSuperAdmin(u)) return 0;
+      if (u.role === "admin") return 1;
+      if (u.role === "verifier") return 2;
+      return 3;
+    };
+    uniqueList.sort((a, b) => {
+      const pA = getPriority(a);
+      const pB = getPriority(b);
+      if (pA !== pB) return pA - pB;
+      return (a.name || "").localeCompare(b.name || "");
+    });
+
+    return uniqueList;
+  } catch (error) {
+    console.warn("Could not fetch all users from server, loading from cache:", error);
+    try {
+      const cached = getLocalUsersCache();
+      return cached.map(c => c.profile).filter(Boolean);
+    } catch {}
+    return [];
+  }
+}
+
+export function cleanUserLocalCaches(targetId: string, cleanEmail: string) {
+  try {
+    const rawUsers = localStorage.getItem("ef_cached_users");
+    if (rawUsers) {
+      const list = JSON.parse(rawUsers);
+      const filtered = list.filter((u: any) => {
+        const uId = (u.profile?.employeeId || u.profile?.id || "").toLowerCase().trim();
+        const uEmail = (u.email || u.profile?.email || "").toLowerCase().trim();
+        return uId !== targetId.toLowerCase().trim() && (!cleanEmail || uEmail !== cleanEmail);
+      });
+      localStorage.setItem("ef_cached_users", JSON.stringify(filtered));
+    }
+  } catch {}
+
+  try {
+    const rawEmps = localStorage.getItem("ef_cached_employees");
+    if (rawEmps) {
+      const list = JSON.parse(rawEmps);
+      const filtered = list.filter((e: any) => {
+        const eId = (e.employeeId || e.id || "").toLowerCase().trim();
+        const eEmail = (e.email || "").toLowerCase().trim();
+        return eId !== targetId.toLowerCase().trim() && (!cleanEmail || eEmail !== cleanEmail);
+      });
+      localStorage.setItem("ef_cached_employees", JSON.stringify(filtered));
+    }
+  } catch {}
+}
+
 export async function toggleEmployeeAdminRole(targetEmployeeId: string, currentAdminEmail: string): Promise<boolean> {
   try {
-    const userRef = doc(db, "users", targetEmployeeId);
-    const userSnap = await getDoc(userRef);
+    let userRef = doc(db, "users", targetEmployeeId);
+    let userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) {
+      const q = query(collection(db, "users"), where("employeeId", "==", targetEmployeeId));
+      const qSnap = await getDocs(q);
+      if (!qSnap.empty) {
+        userRef = doc(db, "users", qSnap.docs[0].id);
+        userSnap = qSnap.docs[0] as any;
+      }
+    }
     if (!userSnap.exists()) return false;
 
     const userData = userSnap.data() as EmployeeProfile;
@@ -1390,7 +1523,64 @@ export async function toggleEmployeeAdminRole(targetEmployeeId: string, currentA
   }
 }
 
-export async function deleteEmployeeProfile(
+export async function updateUserRole(
+  targetEmployeeId: string,
+  newRole: "employee" | "verifier" | "admin",
+  currentAdminEmail: string,
+  currentAdminId: string,
+  currentAdminName: string
+): Promise<boolean> {
+  try {
+    let userRef = doc(db, "users", targetEmployeeId);
+    let userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) {
+      const q = query(collection(db, "users"), where("employeeId", "==", targetEmployeeId));
+      const qSnap = await getDocs(q);
+      if (!qSnap.empty) {
+        userRef = doc(db, "users", qSnap.docs[0].id);
+        userSnap = qSnap.docs[0] as any;
+      }
+    }
+
+    if (!userSnap.exists()) return false;
+
+    const userData = userSnap.data() as EmployeeProfile;
+    if (isSuperAdmin(userData)) {
+      throw new Error("The Super Admin (STEMWORLD) role cannot be altered.");
+    }
+    const oldRole = userData.role || "employee";
+    await updateDoc(userRef, { role: newRole });
+
+    // Update in local cache if present
+    try {
+      const rawUsers = localStorage.getItem("ef_cached_users");
+      if (rawUsers) {
+        const list = JSON.parse(rawUsers);
+        const updated = list.map((u: any) => {
+          if (u.profile?.employeeId === targetEmployeeId || u.profile?.id === targetEmployeeId) {
+            return { ...u, profile: { ...u.profile, role: newRole } };
+          }
+          return u;
+        });
+        localStorage.setItem("ef_cached_users", JSON.stringify(updated));
+      }
+    } catch {}
+
+    await logActivity(
+      currentAdminId,
+      currentAdminName,
+      `Change Role to ${newRole.toUpperCase()}`,
+      `Changed role of ${userData.name} (${targetEmployeeId}) from ${oldRole} to ${newRole} by ${currentAdminEmail}`
+    );
+    return true;
+  } catch (error) {
+    console.error("Error updating user role:", error);
+    throw error;
+  }
+}
+
+export async function deleteUserAccount(
   targetEmployeeId: string,
   adminUserId: string,
   adminName: string,
@@ -1401,36 +1591,126 @@ export async function deleteEmployeeProfile(
       throw new Error("You cannot delete your own account while logged in.");
     }
 
-    const userRef = doc(db, "users", targetEmployeeId);
-    const userSnap = await getDoc(userRef);
-    if (!userSnap.exists()) return false;
+    let userRef = doc(db, "users", targetEmployeeId);
+    let userSnap = await getDoc(userRef);
+    let actualDocId = targetEmployeeId;
 
-    const userData = userSnap.data() as EmployeeProfile;
-
-
-    await deleteDoc(userRef);
-
-    let expensesDeletedCount = 0;
-    if (deleteExpenses) {
-      const q = query(collection(db, "expenses"), where("employeeId", "==", targetEmployeeId));
-      const snap = await getDocs(q);
-      const batchPromises = snap.docs.map(d => deleteDoc(doc(db, "expenses", d.id)));
-      await Promise.all(batchPromises);
-      expensesDeletedCount = snap.docs.length;
+    if (!userSnap.exists()) {
+      const q = query(collection(db, "users"), where("employeeId", "==", targetEmployeeId));
+      const qSnap = await getDocs(q);
+      if (!qSnap.empty) {
+        userRef = doc(db, "users", qSnap.docs[0].id);
+        userSnap = qSnap.docs[0] as any;
+        actualDocId = qSnap.docs[0].id;
+      } else {
+        const qEmail = query(collection(db, "users"), where("email", "==", targetEmployeeId.toLowerCase()));
+        const qEmailSnap = await getDocs(qEmail);
+        if (!qEmailSnap.empty) {
+          userRef = doc(db, "users", qEmailSnap.docs[0].id);
+          userSnap = qEmailSnap.docs[0] as any;
+          actualDocId = qEmailSnap.docs[0].id;
+        }
+      }
     }
 
+    if (!userSnap.exists()) {
+      // Clean up local caches anyway in case it was only cached locally
+      cleanUserLocalCaches(targetEmployeeId, "");
+      return true;
+    }
+
+    const userData = userSnap.data() as EmployeeProfile;
+    const cleanEmail = (userData.email || "").toLowerCase().trim();
+    const role = (userData.role || "employee").toLowerCase();
+
+    // Prevent deletion of Super Admin (STEMWORLD)
+    if (isSuperAdmin(userData)) {
+      throw new Error("The Super Admin account (STEMWORLD) cannot be deleted.");
+    }
+
+    // Deleting an administrator account requires Super Admin authority
+    if (role === "admin") {
+      const callerIsSuper = isSuperAdmin({ employeeId: adminUserId, name: adminName });
+      if (!callerIsSuper) {
+        const callerRef = doc(db, "users", adminUserId);
+        const callerSnap = await getDoc(callerRef);
+        const callerData = callerSnap.exists() ? (callerSnap.data() as EmployeeProfile) : null;
+        if (!isSuperAdmin(callerData)) {
+          throw new Error("Only the Super Admin (STEMWORLD) can delete administrator accounts.");
+        }
+      }
+    }
+
+    // 1. Delete document from 'users' collection
+    await deleteDoc(userRef);
+
+    // 2. Delete credentials from 'user_credentials' so they can no longer log in
+    if (cleanEmail) {
+      try {
+        await deleteDoc(doc(db, "user_credentials", cleanEmail));
+      } catch (credErr) {
+        console.warn("Could not delete credentials document:", credErr);
+      }
+    }
+
+    // 3. Clean up localStorage caches
+    cleanUserLocalCaches(targetEmployeeId, cleanEmail);
+
+    // 4. Clean up notifications addressed to this user
+    try {
+      const notifQ = query(collection(db, "notifications"), where("userId", "==", targetEmployeeId));
+      const notifSnap = await getDocs(notifQ);
+      await Promise.all(notifSnap.docs.map(d => deleteDoc(doc(db, "notifications", d.id))));
+    } catch (notifErr) {
+      console.warn("Could not clean user notifications:", notifErr);
+    }
+
+    // 5. If deleteExpenses is chosen (mainly for employees), purge expenses and advances
+    let expensesDeletedCount = 0;
+    if (deleteExpenses) {
+      try {
+        const q = query(collection(db, "expenses"), where("employeeId", "==", targetEmployeeId));
+        const snap = await getDocs(q);
+        const batchPromises = snap.docs.map(async d => {
+          try {
+            const chunksQ = query(collection(db, "bill_chunks"), where("expenseId", "==", d.id));
+            const chunksSnap = await getDocs(chunksQ);
+            await Promise.all(chunksSnap.docs.map(c => deleteDoc(doc(db, "bill_chunks", c.id))));
+          } catch {}
+          return deleteDoc(doc(db, "expenses", d.id));
+        });
+        await Promise.all(batchPromises);
+        expensesDeletedCount = snap.docs.length;
+      } catch (expErr) {
+        console.warn("Could not delete expenses for user:", expErr);
+      }
+
+      // Advances cleanup
+      try {
+        const qAdv = query(collection(db, "advances"), where("employeeId", "==", targetEmployeeId));
+        const snapAdv = await getDocs(qAdv);
+        await Promise.all(snapAdv.docs.map(d => deleteDoc(doc(db, "advances", d.id))));
+      } catch (advErr) {
+        console.warn("Could not delete advances for user:", advErr);
+      }
+    }
+
+    const roleLabel = role === "verifier" ? "Verifier" : role === "admin" ? "Admin" : "Employee";
     await logActivity(
       adminUserId,
       adminName,
-      "Delete Employee",
-      `Deleted employee ${userData.name} (${targetEmployeeId}) profile.${deleteExpenses ? ` Also deleted ${expensesDeletedCount} associated expense claims.` : ""}`
+      `Delete ${roleLabel} Account`,
+      `Deleted ${roleLabel} account for ${userData.name} (${targetEmployeeId}).${deleteExpenses ? ` Purged ${expensesDeletedCount} associated claims and advances.` : ""}`
     );
+
     return true;
   } catch (error) {
-    console.error("Error deleting employee profile:", error);
+    console.error("Error deleting user account:", error);
     throw error;
   }
 }
+
+export const deleteEmployeeProfile = deleteUserAccount;
 
 export async function toggleEmployeeAccountStatus(
   targetEmployeeId: string,
@@ -1438,23 +1718,50 @@ export async function toggleEmployeeAccountStatus(
   adminName: string
 ): Promise<"active" | "deactivated"> {
   try {
-    const userRef = doc(db, "users", targetEmployeeId);
-    const userSnap = await getDoc(userRef);
-    if (!userSnap.exists()) throw new Error("Employee not found.");
+    let userRef = doc(db, "users", targetEmployeeId);
+    let userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) {
+      const q = query(collection(db, "users"), where("employeeId", "==", targetEmployeeId));
+      const qSnap = await getDocs(q);
+      if (!qSnap.empty) {
+        userRef = doc(db, "users", qSnap.docs[0].id);
+        userSnap = qSnap.docs[0] as any;
+      }
+    }
+
+    if (!userSnap.exists()) throw new Error("Account not found.");
 
     const userData = userSnap.data() as EmployeeProfile;
     const newStatus: "active" | "deactivated" = userData.status === "deactivated" ? "active" : "deactivated";
 
     await updateDoc(userRef, { status: newStatus });
+
+    // Update local cache
+    try {
+      const rawUsers = localStorage.getItem("ef_cached_users");
+      if (rawUsers) {
+        const list = JSON.parse(rawUsers);
+        const updated = list.map((u: any) => {
+          if (u.profile?.employeeId === targetEmployeeId || u.profile?.id === targetEmployeeId) {
+            return { ...u, profile: { ...u.profile, status: newStatus } };
+          }
+          return u;
+        });
+        localStorage.setItem("ef_cached_users", JSON.stringify(updated));
+      }
+    } catch {}
+
+    const roleLabel = (userData.role || "user").toUpperCase();
     await logActivity(
       adminUserId,
       adminName,
-      newStatus === "deactivated" ? "Deactivate Employee" : "Reactivate Employee",
-      `Changed status of employee ${userData.name} (${targetEmployeeId}) to ${newStatus}`
+      newStatus === "deactivated" ? `Deactivate ${roleLabel}` : `Reactivate ${roleLabel}`,
+      `Changed status of ${userData.role || "user"} ${userData.name} (${targetEmployeeId}) to ${newStatus}`
     );
     return newStatus;
   } catch (error) {
-    console.error("Error toggling employee account status:", error);
+    console.error("Error toggling account status:", error);
     throw error;
   }
 }

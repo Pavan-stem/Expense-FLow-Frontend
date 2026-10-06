@@ -42,9 +42,19 @@ export default function App() {
     };
     initDb();
 
-    // Clean stale cached employees if any exist
+    // Clean stale cached employees/users if any exist
     try {
       localStorage.removeItem("ef_cached_employees");
+      const rawCachedUsers = localStorage.getItem("ef_cached_users");
+      if (rawCachedUsers) {
+        const parsed = JSON.parse(rawCachedUsers);
+        const filtered = parsed.filter((u: any) => 
+          u.email !== "stem.admin@gmail.com" && 
+          u.profile?.email !== "stem.admin@gmail.com" &&
+          u.profile?.employeeId !== "ADM_STEM"
+        );
+        localStorage.setItem("ef_cached_users", JSON.stringify(filtered));
+      }
     } catch {}
 
     // Recover login session from localStorage

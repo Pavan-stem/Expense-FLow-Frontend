@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { 
   getExpenses, 
-  subscribeToExpenses,
+  subscribeToExpenses, 
   getEmployees, 
+  getAllUsers,
+  isSuperAdmin,
   addCategory, 
   getCategories, 
   toggleEmployeeAdminRole,
+  updateUserRole,
   deleteEmployeeProfile,
+  deleteUserAccount,
   toggleEmployeeAccountStatus,
   markEmployeeExpensesAsReimbursed,
   markAllEmployeesExpensesAsReimbursed,
@@ -65,7 +69,12 @@ import {
   Send,
   CheckCircle,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ClipboardCheck,
+  UserCheck,
+  UserX,
+  User,
+  Crown
 } from "lucide-react";
 
 
@@ -112,9 +121,15 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
   const [roleMessage, setRoleMessage] = useState("");
   const [roleLoadingId, setRoleLoadingId] = useState<string | null>(null);
 
+  // Staff and Accounts Management
+  const [staffUsers, setStaffUsers] = useState<EmployeeProfile[]>([]);
+  const [staffRoleFilter, setStaffRoleFilter] = useState<"all" | "employee" | "verifier" | "admin">("all");
+  const [staffSearchQuery, setStaffSearchQuery] = useState("");
 
-  // Employee deletion state
-  const [deletingEmployee, setDeletingEmployee] = useState<EmployeeProfile | null>(null);
+  // Account deletion state (supports employees, verifiers, admins)
+  const [deletingUser, setDeletingUser] = useState<EmployeeProfile | null>(null);
+  const deletingEmployee = deletingUser;
+  const setDeletingEmployee = setDeletingUser;
   const [deleteExpensesOption, setDeleteExpensesOption] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteMessage, setDeleteMessage] = useState("");
@@ -397,8 +412,9 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
       const success = await toggleEmployeeAdminRole(targetEmp.employeeId, user.email);
       if (success) {
         setRoleMessage(`Successfully updated administrative role for ${targetEmp.name}.`);
-        const empData = await getEmployees();
+        const [empData, allUsers] = await Promise.all([getEmployees(), getAllUsers()]);
         setEmployees(empData.filter(e => e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
+        setStaffUsers(allUsers);
       } else {
         setRoleMessage("Failed to update user authorization role.");
       }
@@ -409,34 +425,71 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
     }
   };
 
-  const handleConfirmDeleteEmployee = async () => {
-    if (!deletingEmployee) return;
+  const handleChangeRole = async (targetEmp: EmployeeProfile, newRole: "employee" | "verifier" | "admin") => {
+    if (targetEmp.employeeId === user.employeeId || targetEmp.email.toLowerCase().trim() === user.email.toLowerCase().trim()) {
+      showToast("error", "Cannot modify your own administrative privileges.");
+      return;
+    }
+    setRoleLoadingId(targetEmp.employeeId);
+    setRoleMessage("");
+    try {
+      const success = await updateUserRole(targetEmp.employeeId, newRole, user.email, user.employeeId, user.name);
+      if (success) {
+        showToast("success", `✓ Updated role for ${targetEmp.name} to ${newRole.toUpperCase()}.`);
+        setRoleMessage(`Role updated for ${targetEmp.name} to ${newRole.toUpperCase()}.`);
+        const [empData, allUsers] = await Promise.all([getEmployees(), getAllUsers()]);
+        setEmployees(empData.filter(e => e.role !== "admin" && e.role !== "verifier" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
+        setStaffUsers(allUsers);
+      } else {
+        showToast("error", "Failed to update user authorization role.");
+      }
+    } catch (err: any) {
+      showToast("error", err.message || "Error processing permission adjustment.");
+    } finally {
+      setRoleLoadingId(null);
+    }
+  };
+
+  const handleConfirmDeleteUser = async () => {
+    const targetUser = deletingUser || deletingEmployee;
+    if (!targetUser) return;
     setDeleteLoading(true);
     setDeleteMessage("");
     try {
-      const success = await deleteEmployeeProfile(
-        deletingEmployee.employeeId,
+      const targetRole = (targetUser.role || "employee").toLowerCase();
+      const targetRoleLabel = targetRole === "verifier" ? "Verifier" : targetRole === "admin" ? "Admin" : "Employee";
+      const targetName = targetUser.name;
+      const success = await deleteUserAccount(
+        targetUser.employeeId,
         user.employeeId,
         user.name,
         deleteExpensesOption
       );
       if (success) {
-        const empData = await getEmployees();
-        setEmployees(empData.filter(e => e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
-        const expData = await getExpenses();
+        const [empData, expData, allUsers] = await Promise.all([
+          getEmployees(),
+          getExpenses(),
+          getAllUsers()
+        ]);
+        setEmployees(empData.filter(e => e.role !== "admin" && e.role !== "verifier" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
         setExpenses(expData);
-        setDeletingEmployee(null);
+        setStaffUsers(allUsers);
+        setDeletingUser(null);
         setDeleteExpensesOption(false);
-        setRoleMessage(`Successfully deleted employee profile and data for ${deletingEmployee.name}.`);
+        showToast("success", `✓ Successfully deleted ${targetRoleLabel} account for ${targetName}.`);
+        setRoleMessage(`Successfully deleted ${targetRoleLabel} account for ${targetName}.`);
       } else {
-        setDeleteMessage("Failed to delete the employee profile.");
+        setDeleteMessage("Failed to delete the user account.");
       }
     } catch (err: any) {
-      setDeleteMessage(err.message || "Error deleting employee profile.");
+      setDeleteMessage(err.message || "Error deleting user account.");
     } finally {
       setDeleteLoading(false);
     }
   };
+
+  // Backward compatibility alias for any existing reference
+  const handleConfirmDeleteEmployee = handleConfirmDeleteUser;
 
   const formatDateForExcel = (dateStr: string) => {
     if (!dateStr) return "";
@@ -450,13 +503,15 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
   const fetchData = async () => {
     setLoading(true);
     try {
-      const expData = await getExpenses();
+      const [expData, empData, allUserData, catData] = await Promise.all([
+        getExpenses(),
+        getEmployees(),
+        getAllUsers(),
+        getCategories()
+      ]);
       setExpenses(expData);
-
-      const empData = await getEmployees();
       setEmployees(empData.filter(e => e.role !== "admin" && e.role !== "verifier" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
-
-      const catData = await getCategories();
+      setStaffUsers(allUserData);
       setCategories(catData);
     } catch (err) {
       console.error("Error loading admin stats:", err);
@@ -474,6 +529,10 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
 
     getEmployees().then(empData => {
       setEmployees(empData.filter(e => e.role !== "admin" && e.role !== "verifier" && e.email.toLowerCase().trim() !== "stem.admin@gmail.com" && e.employeeId !== "ADM_STEM"));
+    });
+
+    getAllUsers().then(allUserData => {
+      setStaffUsers(allUserData);
     });
 
     getCategories().then(catData => {
@@ -543,9 +602,10 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
     try {
       const newStatus = await toggleEmployeeAccountStatus(targetEmpId, user.employeeId, user.name);
       setEmployees(prev => prev.map(e => e.employeeId === targetEmpId ? { ...e, status: newStatus } : e));
+      setStaffUsers(prev => prev.map(e => e.employeeId === targetEmpId ? { ...e, status: newStatus } : e));
       showToast("success", `Account status for ${name || targetEmpId} updated to ${newStatus.toUpperCase()}.`);
     } catch (err: any) {
-      showToast("error", err.message || "Failed to update employee account status.");
+      showToast("error", err.message || "Failed to update account status.");
     }
   };
 
@@ -1359,197 +1419,508 @@ export default function AdminDashboard({ user, onNavigateToQueue, refreshTrigger
         </div>
       </div>
 
-      {/* NEW: Team Roles, Access Controls & Employee Registry Panel */}
-      {user.role === "admin" && (
-        <div id="stem-admin-roles-panel" className="bg-slate-900 text-white rounded-2xl border border-slate-800 p-6 shadow-lg space-y-6">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-5">
-            <div className="flex items-center gap-3">
-              <span className="p-2.5 bg-indigo-600 text-white rounded-xl">
-                <Lock className="h-5 w-5" />
-              </span>
-              <div>
-                <h3 className="text-sm font-bold tracking-wider">Administrative Roles, Permissions & Team Management</h3>
-                <p className="text-[10px] text-slate-400 mt-0.5">Manage corporate team profiles, assign administrative capabilities, or delete redundant accounts.</p>
-              </div>
-            </div>
-            <span className="px-3 py-1 bg-indigo-950 text-indigo-400 border border-indigo-800 rounded-full text-[10px] font-bold font-mono uppercase">
-              Admin Console
-            </span>
+      {/* Corporate Staff & Account Access Management Panel */}
+      {user.role === "admin" && (() => {
+        const filteredStaffUsers = staffUsers.filter(staff => {
+          if (staffRoleFilter !== "all" && staff.role !== staffRoleFilter) return false;
+          if (staffSearchQuery.trim()) {
+            const q = staffSearchQuery.toLowerCase().trim();
+            const matchName = (staff.name || "").toLowerCase().includes(q);
+            const matchEmail = (staff.email || "").toLowerCase().includes(q);
+            const matchId = (staff.employeeId || staff.id || "").toLowerCase().includes(q);
+            const matchDept = (staff.department || "").toLowerCase().includes(q);
+            const matchDesig = (staff.designation || "").toLowerCase().includes(q);
+            return matchName || matchEmail || matchId || matchDept || matchDesig;
+          }
+          return true;
+        });
 
-          </div>
+        const countTotalStaff = staffUsers.length;
+        const countEmployees = staffUsers.filter(s => s.role === "employee").length;
+        const countVerifiers = staffUsers.filter(s => s.role === "verifier").length;
+        const countAdmins = staffUsers.filter(s => s.role === "admin").length;
 
-          {roleMessage && (
-            <div id="role-feedback-banner" className="p-3 bg-indigo-950/50 border border-indigo-800/50 text-indigo-300 text-xs font-semibold rounded-xl flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 text-indigo-400 flex-shrink-0" />
-              <span>{roleMessage}</span>
-            </div>
-          )}
+        const callerIsSuperAdmin = isSuperAdmin(user);
 
-          <div className="overflow-hidden border border-slate-800 rounded-xl bg-slate-950/30">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-900/60 border-b border-slate-800 text-slate-400 text-[10px] uppercase tracking-wider font-bold">
-                    <th className="py-3 px-4 font-sans">Employee Details</th>
-                    <th className="py-3 px-4 font-sans">Email Address</th>
-                    <th className="py-3 px-4 text-center font-sans">Account Status</th>
-                    <th className="py-3 px-6 text-center font-sans">Administrative Toggle</th>
-                    <th className="py-3 px-4 text-center font-sans">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/50 text-xs text-slate-300">
-                  {employees.map(emp => {
-                    const isSelf = emp.email.toLowerCase().trim() === user.email.toLowerCase().trim() || emp.employeeId === user.employeeId;
-                    const isAdmin = emp.role === "admin";
-                    const isDeactivated = emp.status === "deactivated";
-                    const canDelete = !isSelf;
-                    return (
-                      <tr key={emp.employeeId} className="hover:bg-slate-900/20 transition">
-                        <td className="py-3 px-4">
-                          <div className="font-bold text-white">{emp.name}</div>
-                        </td>
-                        <td className="py-3 px-4 font-mono text-[11px] text-slate-400">{emp.email}</td>
-                        <td className="py-3 px-4 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleAccountStatus(emp.employeeId, emp.status, emp.name)}
-                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
-                              isDeactivated
-                                ? "bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-800"
-                                : "bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800"
-                            }`}
-                            title={isDeactivated ? "Click to Reactivate Account" : "Click to Deactivate Account"}
-                          >
-                            {isDeactivated ? "🔴 Deactivated (Click to Activate)" : "🟢 Active (Click to Deactivate)"}
-                          </button>
-                        </td>
-                        <td className="py-3 px-6 text-center">
-                          {isSelf ? (
-                            <span className="text-[10px] text-slate-500 font-medium italic">Your Profile</span>
-                          ) : (
-                            <button
-                              id={`toggle-role-btn-${emp.employeeId}`}
-                              onClick={() => handleToggleRole(emp)}
-                              disabled={roleLoadingId !== null}
-                              className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider transition uppercase cursor-pointer ${
-                                isAdmin
-                                  ? "bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800"
-                                  : "bg-indigo-900 hover:bg-indigo-800 text-indigo-300 border border-indigo-700"
-                              }`}
-                            >
-                              {roleLoadingId === emp.employeeId ? (
-                                <RefreshCw className="h-3 w-3 animate-spin mx-auto" />
-                              ) : isAdmin ? (
-                                "Demote to Employee"
-                              ) : (
-                                "Promote to Admin"
-                              )}
-                            </button>
-                          )}
-                        </td>
-
-                        <td className="py-3 px-4 text-center">
-                          {canDelete ? (
-                            <button
-                              id={`delete-emp-btn-${emp.employeeId}`}
-                              onClick={() => {
-                                setDeletingEmployee(emp);
-                                setDeleteExpensesOption(false);
-                                setDeleteMessage("");
-                              }}
-                              className="p-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 border border-rose-800/60 rounded-lg hover:text-rose-200 transition cursor-pointer flex items-center justify-center mx-auto"
-                              title="Delete Employee"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          ) : (
-                            <span className="text-[10px] text-slate-600 font-medium italic">N/A</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* CUSTOM MODAL: Delete Employee Confirmation */}
-      {deletingEmployee && (
-        <div id="delete-employee-modal" className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto">
-
-          <div className="bg-slate-900 border border-slate-800 text-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col p-6 space-y-4">
-            <div className="flex items-center gap-3 text-rose-500">
-              <span className="p-2 bg-rose-950 rounded-xl">
-                <Trash2 className="h-6 w-6" />
-              </span>
-              <div>
-                <h3 className="text-base font-bold">Delete Employee Profile</h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">This action is irreversible.</p>
-              </div>
-            </div>
-
-            <div className="text-xs text-slate-300 space-y-2">
-              <p>
-                Are you sure you want to delete the employee profile for{" "}
-                <span className="font-bold text-white">{deletingEmployee.name}</span>?
-              </p>
-              <p className="text-slate-400">
-                They will no longer be able to log in or submit expense claims, and will be removed from all dropdown filters.
-              </p>
-            </div>
-
-            <div className="bg-slate-950/50 p-3 rounded-xl border border-slate-800/80">
-              <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                <input
-                  id="delete-expenses-checkbox"
-                  type="checkbox"
-                  checked={deleteExpensesOption}
-                  onChange={(e) => setDeleteExpensesOption(e.target.checked)}
-                  className="mt-0.5 rounded border-slate-700 bg-slate-800 text-rose-600 focus:ring-rose-500 h-3.5 w-3.5 cursor-pointer"
-                />
-                <div className="text-xs">
-                  <span className="font-semibold text-slate-200 block">Delete associated expense claims</span>
-                  <span className="text-[10px] text-slate-400 block mt-0.5">
-                    Check this to permanently purge all existing expense claims logged by this employee.
-                  </span>
+        return (
+          <div id="stem-admin-roles-panel" className="bg-slate-900 text-white rounded-2xl border border-slate-800 p-6 shadow-lg space-y-6">
+            {/* Header & KPI Summary */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
+              <div className="flex items-center gap-3">
+                <span className={`p-2.5 ${callerIsSuperAdmin ? "bg-amber-600 shadow-amber-600/30" : "bg-indigo-600 shadow-indigo-600/20"} text-white rounded-xl shadow-lg`}>
+                  {callerIsSuperAdmin ? <Crown className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
+                </span>
+                <div>
+                  <h3 className="text-base font-bold tracking-wide flex items-center gap-2">
+                    Corporate Staff & Account Access Management
+                    {callerIsSuperAdmin && (
+                      <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded-full text-[10px] font-bold tracking-normal flex items-center gap-1">
+                        <Crown className="h-3 w-3 text-amber-400" /> Super Admin Mode
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {callerIsSuperAdmin
+                      ? "Super Admin access: You have full authority to manage all staff and delete admin, verifier, or employee accounts."
+                      : "Manage employee & verifier accounts, adjust authorization roles, or permanently delete accounts for departed personnel."}
+                  </p>
                 </div>
-              </label>
+              </div>
+
+              {/* KPI Badges */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2.5 py-1 bg-slate-800 text-slate-300 border border-slate-700 rounded-lg text-[11px] font-semibold">
+                  Total: <strong className="text-white ml-1">{countTotalStaff}</strong>
+                </span>
+                <span className="px-2.5 py-1 bg-emerald-950 text-emerald-300 border border-emerald-800 rounded-lg text-[11px] font-semibold flex items-center gap-1">
+                  <User className="h-3 w-3" /> Employees: <strong className="text-emerald-200 ml-0.5">{countEmployees}</strong>
+                </span>
+                <span className="px-2.5 py-1 bg-purple-950 text-purple-300 border border-purple-800 rounded-lg text-[11px] font-semibold flex items-center gap-1">
+                  <ClipboardCheck className="h-3 w-3" /> Verifiers: <strong className="text-purple-200 ml-0.5">{countVerifiers}</strong>
+                </span>
+                <span className="px-2.5 py-1 bg-indigo-950 text-indigo-300 border border-indigo-800 rounded-lg text-[11px] font-semibold flex items-center gap-1">
+                  <Shield className="h-3 w-3" /> Admins: <strong className="text-indigo-200 ml-0.5">{countAdmins}</strong>
+                </span>
+              </div>
             </div>
 
-            {deleteMessage && (
-              <div className="p-3 bg-rose-950/30 border border-rose-900/50 text-rose-300 text-xs rounded-xl font-medium">
-                {deleteMessage}
+            {roleMessage && (
+              <div id="role-feedback-banner" className="p-3 bg-indigo-950/60 border border-indigo-800/80 text-indigo-200 text-xs font-semibold rounded-xl flex items-center justify-between gap-2 animate-fadeIn">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="h-4 w-4 text-indigo-400 flex-shrink-0" />
+                  <span>{roleMessage}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRoleMessage("")}
+                  className="text-indigo-400 hover:text-white text-xs cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                id="cancel-delete-emp-btn"
-                onClick={() => setDeletingEmployee(null)}
-                disabled={deleteLoading}
-                className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                id="confirm-delete-emp-btn"
-                onClick={handleConfirmDeleteEmployee}
-                disabled={deleteLoading}
-                className="px-4 py-2 text-xs font-semibold rounded-xl bg-rose-600 hover:bg-rose-500 text-white transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-              >
-                {deleteLoading ? (
-                  <RefreshCw className="h-3 w-3 animate-spin" />
-                ) : (
-                  "Delete Employee"
+            {/* Filter Toolbar: Role Pills & Search Input */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                <button
+                  type="button"
+                  onClick={() => setStaffRoleFilter("all")}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    staffRoleFilter === "all"
+                      ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                      : "bg-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  All Staff <span className="text-[10px] opacity-75 font-mono">({countTotalStaff})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStaffRoleFilter("employee")}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    staffRoleFilter === "employee"
+                      ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
+                      : "bg-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <User className="h-3 w-3" /> Employees <span className="text-[10px] opacity-75 font-mono">({countEmployees})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStaffRoleFilter("verifier")}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    staffRoleFilter === "verifier"
+                      ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                      : "bg-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <ClipboardCheck className="h-3 w-3" /> Verifiers <span className="text-[10px] opacity-75 font-mono">({countVerifiers})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStaffRoleFilter("admin")}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    staffRoleFilter === "admin"
+                      ? "bg-amber-600 text-white shadow-md shadow-amber-600/30"
+                      : "bg-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-800"
+                  }`}
+                >
+                  <Shield className="h-3 w-3" /> Admins <span className="text-[10px] opacity-75 font-mono">({countAdmins})</span>
+                </button>
+              </div>
+
+              {/* Search Box */}
+              <div className="relative min-w-[240px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  value={staffSearchQuery}
+                  onChange={(e) => setStaffSearchQuery(e.target.value)}
+                  placeholder="Search staff, email, ID..."
+                  className="w-full pl-9 pr-8 py-1.5 text-xs bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
+                />
+                {staffSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setStaffSearchQuery("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                 )}
-              </button>
+              </div>
+            </div>
+
+            {/* Staff Accounts Table */}
+            <div className="overflow-hidden border border-slate-800 rounded-xl bg-slate-950/40 shadow-inner">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-900/80 border-b border-slate-800 text-slate-400 text-[10px] uppercase tracking-wider font-bold">
+                      <th className="py-3 px-4 font-sans">Staff Member</th>
+                      <th className="py-3 px-4 text-center font-sans">Role</th>
+                      <th className="py-3 px-4 font-sans">Email Address</th>
+                      <th className="py-3 px-4 text-center font-sans">Account Status</th>
+                      <th className="py-3 px-4 text-center font-sans">Role Assignment</th>
+                      <th className="py-3 px-4 text-center font-sans">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50 text-xs text-slate-300">
+                    {filteredStaffUsers.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-slate-500">
+                          <Users className="h-8 w-8 mx-auto mb-2 text-slate-600 opacity-60" />
+                          <p className="text-xs font-semibold">No accounts match the current filter or search criteria.</p>
+                          {(staffRoleFilter !== "all" || staffSearchQuery) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStaffRoleFilter("all");
+                                setStaffSearchQuery("");
+                              }}
+                              className="mt-2 text-[11px] text-indigo-400 hover:underline font-bold cursor-pointer"
+                            >
+                              Reset filters
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredStaffUsers.map(emp => {
+                        const isSelf = emp.email.toLowerCase().trim() === user.email.toLowerCase().trim() || emp.employeeId === user.employeeId;
+                        const empIsSuper = isSuperAdmin(emp);
+                        const isAdmin = emp.role === "admin";
+                        const isVerifier = emp.role === "verifier";
+                        const isEmployee = emp.role === "employee" || (!isAdmin && !isVerifier);
+                        const isDeactivated = emp.status === "deactivated";
+                        // Super Admin can delete admins; normal admins can only delete non-admins; no one can delete self or Super Admin
+                        const canDelete = !isSelf && !empIsSuper && (!isAdmin || callerIsSuperAdmin);
+
+                        return (
+                          <tr key={emp.employeeId || emp.id || emp.email} className="hover:bg-slate-900/40 transition">
+                            {/* Staff Member Info */}
+                            <td className="py-3.5 px-4">
+                              <div className="flex items-center gap-2.5">
+                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs uppercase flex-shrink-0 ${
+                                  empIsSuper
+                                    ? "bg-amber-950 text-amber-300 border border-amber-500 shadow-sm shadow-amber-500/20"
+                                    : isVerifier
+                                    ? "bg-purple-950 text-purple-300 border border-purple-800"
+                                    : isAdmin
+                                    ? "bg-indigo-950 text-indigo-300 border border-indigo-800"
+                                    : "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                                }`}>
+                                  {empIsSuper ? <Crown className="h-4 w-4 text-amber-400" /> : (emp.name ? emp.name.charAt(0) : "U")}
+                                </div>
+                                <div>
+                                  <div className="font-bold text-white flex items-center gap-2">
+                                    <span>{emp.name}</span>
+                                    {empIsSuper && (
+                                      <span className="px-1.5 py-0.5 bg-amber-950/80 text-amber-300 border border-amber-600 rounded text-[9px] font-bold font-mono flex items-center gap-1">
+                                        <Crown className="h-2.5 w-2.5" /> SUPER
+                                      </span>
+                                    )}
+                                    {isSelf && (
+                                      <span className="px-1.5 py-0.5 bg-indigo-900/60 text-indigo-300 border border-indigo-700/60 rounded text-[9px] font-bold font-mono">
+                                        YOU
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
+                                    <span className="font-mono bg-slate-800/80 px-1.5 py-0.5 rounded text-slate-300">
+                                      {emp.employeeId || emp.id}
+                                    </span>
+                                    {emp.department && (
+                                      <span>• {emp.department}</span>
+                                    )}
+                                    {emp.designation && (
+                                      <span className="hidden sm:inline">({emp.designation})</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Role Badge */}
+                            <td className="py-3.5 px-4 text-center">
+                              {empIsSuper ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-amber-950/90 text-amber-300 border border-amber-600 shadow-sm shadow-amber-950">
+                                  <Crown className="h-3 w-3 text-amber-400" /> Super Admin
+                                </span>
+                              ) : isVerifier ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-purple-950/80 text-purple-300 border border-purple-700/80 shadow-sm shadow-purple-950">
+                                  <ClipboardCheck className="h-3 w-3" /> Verifier
+                                </span>
+                              ) : isAdmin ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-indigo-950/80 text-indigo-300 border border-indigo-700/80 shadow-sm shadow-indigo-950">
+                                  <Shield className="h-3 w-3" /> Admin
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-emerald-950/80 text-emerald-300 border border-emerald-700/80 shadow-sm shadow-emerald-950">
+                                  <User className="h-3 w-3" /> Employee
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Email Address */}
+                            <td className="py-3.5 px-4 font-mono text-[11px] text-slate-300">
+                              {emp.email}
+                            </td>
+
+                            {/* Account Status Toggle */}
+                            <td className="py-3.5 px-4 text-center">
+                              {empIsSuper ? (
+                                <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-amber-950/60 text-amber-300 border border-amber-800/80">
+                                  Permanent
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleAccountStatus(emp.employeeId, emp.status, emp.name)}
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer ${
+                                    isDeactivated
+                                      ? "bg-rose-950 hover:bg-rose-900 text-rose-300 border-rose-800"
+                                      : "bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border-emerald-800"
+                                  }`}
+                                  title={isDeactivated ? "Click to Reactivate Account" : "Click to Deactivate Account"}
+                                >
+                                  {isDeactivated ? "🔴 Deactivated" : "🟢 Active"}
+                                </button>
+                              )}
+                            </td>
+
+                            {/* Role Assignment Dropdown / Selector */}
+                            <td className="py-3.5 px-4 text-center">
+                              {empIsSuper ? (
+                                <span className="text-[10px] text-amber-400 font-semibold flex items-center justify-center gap-1">
+                                  <Crown className="h-3 w-3 text-amber-400" /> Super Admin
+                                </span>
+                              ) : isSelf ? (
+                                <span className="text-[10px] text-slate-500 font-medium italic">Active Session</span>
+                              ) : isAdmin && !callerIsSuperAdmin ? (
+                                <span className="text-[10px] text-indigo-400 font-medium">Administrator</span>
+                              ) : (
+                                <div className="inline-flex items-center">
+                                  {roleLoadingId === emp.employeeId ? (
+                                    <RefreshCw className="h-3.5 w-3.5 animate-spin mx-auto text-indigo-400" />
+                                  ) : (
+                                    <select
+                                      value={emp.role || "employee"}
+                                      onChange={(e) => handleChangeRole(emp, e.target.value as any)}
+                                      className="bg-slate-900 text-slate-200 border border-slate-700 rounded-lg px-2 py-1 text-[11px] font-semibold focus:outline-none focus:border-indigo-500 cursor-pointer"
+                                      title="Change Account Authorization Role"
+                                    >
+                                      <option value="employee">Employee</option>
+                                      <option value="verifier">Verifier</option>
+                                      <option value="admin">Administrator</option>
+                                    </select>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Actions (Delete Account) */}
+                            <td className="py-3.5 px-4 text-center">
+                              {empIsSuper ? (
+                                <span className="text-[10px] text-amber-500/80 font-medium italic">Super Admin</span>
+                              ) : isSelf ? (
+                                <span className="text-[10px] text-slate-600 font-medium italic">Your Session</span>
+                              ) : !canDelete && isAdmin ? (
+                                <span className="text-[10px] text-slate-500 font-medium italic" title="Only Super Admin (STEMWORLD) can delete administrators">Protected</span>
+                              ) : canDelete ? (
+                                <button
+                                  id={`delete-user-btn-${emp.employeeId}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setDeletingUser(emp);
+                                    setDeleteExpensesOption(false);
+                                    setDeleteMessage("");
+                                  }}
+                                  className="p-1.5 bg-rose-950/40 hover:bg-rose-900/80 text-rose-400 border border-rose-800/60 hover:border-rose-700 rounded-lg hover:text-white transition cursor-pointer flex items-center justify-center mx-auto shadow-sm"
+                                  title={`Permanently Delete ${isVerifier ? "Verifier" : isAdmin ? "Admin" : "Employee"} Account`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              ) : (
+                                <span className="text-[10px] text-slate-600 font-medium italic">Restricted</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
+      {/* CUSTOM MODAL: Delete Employee, Verifier, or Admin Account Confirmation */}
+      {deletingUser && (() => {
+        const isTargetVerifier = deletingUser.role === "verifier";
+        const isTargetAdmin = deletingUser.role === "admin";
+        const targetRoleTitle = isTargetVerifier ? "Verifier" : isTargetAdmin ? "Administrator" : "Employee";
+
+        return (
+          <div id="delete-user-modal" className="fixed inset-0 min-h-screen w-screen bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 z-50 overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 text-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col p-6 space-y-4 animate-scaleUp">
+              
+              {/* Modal Header */}
+              <div className="flex items-center gap-3 text-rose-500 border-b border-slate-800 pb-3">
+                <span className="p-2.5 bg-rose-950 border border-rose-900 rounded-xl flex-shrink-0">
+                  <Trash2 className="h-6 w-6 text-rose-400" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-white">Delete {targetRoleTitle} Account</h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Permanent account deletion</p>
+                </div>
+              </div>
+
+              {/* Target User Summary Card */}
+              <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-sm text-white">{deletingUser.name}</h4>
+                    <p className="font-mono text-xs text-slate-400">{deletingUser.email}</p>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono uppercase border ${
+                    isTargetVerifier
+                      ? "bg-purple-950 text-purple-300 border-purple-800"
+                      : isTargetAdmin
+                      ? "bg-indigo-950 text-indigo-300 border-indigo-800"
+                      : "bg-emerald-950 text-emerald-300 border-emerald-800"
+                  }`}>
+                    {targetRoleTitle}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-[11px] text-slate-400 pt-1 border-t border-slate-800/80">
+                  <span>ID: <strong className="text-slate-200 font-mono">{deletingUser.employeeId || deletingUser.id}</strong></span>
+                  {deletingUser.department && (
+                    <span>Dept: <strong className="text-slate-200">{deletingUser.department}</strong></span>
+                  )}
+                </div>
+              </div>
+
+              {/* Context Explanation */}
+              <div className="text-xs text-slate-300 space-y-2 leading-relaxed">
+                <p>
+                  Are you sure you want to permanently delete the {targetRoleTitle.toLowerCase()} account for{" "}
+                  <strong className="text-white">{deletingUser.name}</strong>?
+                </p>
+                <p className="text-slate-400">
+                  Their login credentials will be permanently erased. They will no longer be able to sign in to ExpenseFlow or access the corporate portal.
+                </p>
+              </div>
+
+              {/* Admin-Specific Informational Notice */}
+              {isTargetAdmin && (
+                <div className="bg-amber-950/30 p-3 rounded-xl border border-amber-900/50 text-[11px] text-amber-200 leading-relaxed flex items-start gap-2">
+                  <Crown className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold block text-amber-100">Super Admin Authority Required</span>
+                    <span>As Super Admin (STEMWORLD), confirming this action will permanently delete this Administrator account. Their administrative dashboard access and login credentials will be revoked immediately.</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Employee-Specific Options */}
+              {!isTargetVerifier && !isTargetAdmin && (
+                <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                    <input
+                      id="delete-expenses-checkbox"
+                      type="checkbox"
+                      checked={deleteExpensesOption}
+                      onChange={(e) => setDeleteExpensesOption(e.target.checked)}
+                      className="mt-0.5 rounded border-slate-700 bg-slate-800 text-rose-600 focus:ring-rose-500 h-4 w-4 cursor-pointer"
+                    />
+                    <div className="text-xs">
+                      <span className="font-semibold text-slate-200 block">Purge associated expense claims & advances</span>
+                      <span className="text-[10px] text-slate-400 block mt-0.5 leading-normal">
+                        Check to permanently delete all expense claims and advance requests logged by this employee. If unchecked, historical expense records are retained for auditing compliance.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              )}
+
+              {/* Verifier-Specific Informational Notice */}
+              {isTargetVerifier && (
+                <div className="bg-purple-950/30 p-3 rounded-xl border border-purple-900/50 text-[11px] text-purple-200 leading-relaxed flex items-start gap-2">
+                  <ClipboardCheck className="h-4 w-4 text-purple-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold block text-purple-100">Verification Audit Trail Preserved</span>
+                    <span>Deleting this verifier account revokes their portal login. Existing expense vouchers verified by this verifier will retain their verification timestamps and approval history in the corporate audit logs.</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Danger Notice */}
+              <div className="p-2.5 bg-rose-950/30 border border-rose-900/60 rounded-xl text-[11px] text-rose-300 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-rose-400 flex-shrink-0" />
+                <span>This action cannot be undone once confirmed.</span>
+              </div>
+
+              {deleteMessage && (
+                <div className="p-3 bg-rose-950/50 border border-rose-900 text-rose-200 text-xs rounded-xl font-medium">
+                  {deleteMessage}
+                </div>
+              )}
+
+              {/* Modal Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  id="cancel-delete-user-btn"
+                  type="button"
+                  onClick={() => setDeletingUser(null)}
+                  disabled={deleteLoading}
+                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  id="confirm-delete-user-btn"
+                  type="button"
+                  onClick={handleConfirmDeleteUser}
+                  disabled={deleteLoading}
+                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-rose-600 hover:bg-rose-500 text-white transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-md shadow-rose-900/30"
+                >
+                  {deleteLoading ? (
+                    <>
+                      <RefreshCw className="h-3 w-3 animate-spin" />
+                      <span>Deleting Account...</span>
+                    </>
+                  ) : (
+                    <span>Permanently Delete {targetRoleTitle}</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* DETAIL MODAL: Voucher Claim Specifications */}
       {viewingVoucherDetails && (
